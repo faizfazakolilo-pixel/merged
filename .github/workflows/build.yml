@@ -82,10 +82,29 @@ jobs:
               sys.exit(1)
           PY
 
+      - name: Buat merge.bin
+        run: |
+          ls -la out
+          M=$(ls out/*.merged.bin 2>/dev/null | head -n1 || true)
+          if [ -n "$M" ]; then
+            cp "$M" out/merge.bin
+          else
+            echo "merged.bin dari core tidak ada, membuat sendiri dengan esptool"
+            CORE_DIR=$(ls -d $HOME/.arduino15/packages/esp32/hardware/esp32/*/ | head -n1)
+            ET=$(find $HOME/.arduino15/packages/esp32/tools/esptool_py -maxdepth 2 \( -name esptool.py -o -name esptool \) -type f | head -n1)
+            echo "esptool: $ET"
+            if [[ "$ET" == *.py ]]; then RUN="python3 $ET"; else RUN="$ET"; fi
+            $RUN --chip esp32 merge_bin -o out/merge.bin \
+              --flash_mode dio --flash_freq 40m --flash_size 4MB \
+              0x1000 out/motor_nav_esp32_v22.ino.bootloader.bin \
+              0x8000 out/motor_nav_esp32_v22.ino.partitions.bin \
+              0xe000 ${CORE_DIR}tools/partitions/boot_app0.bin \
+              0x10000 out/motor_nav_esp32_v22.ino.bin
+          fi
+          ls -la out/merge.bin
+
       - name: Unggah hasil
         uses: actions/upload-artifact@v4
         with:
           name: firmware-esp32
-          path: |
-            out/*.merged.bin
-            out/*.bin
+          path: out/
