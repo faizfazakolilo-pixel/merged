@@ -1,1 +1,63 @@
+name: Build ESP32 firmware
 
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      esp32_core:
+        description: "Versi ESP32 core (Arduino)"
+        default: "2.0.17"
+      gfx_version:
+        description: "Versi library GFX Library for Arduino (kosong = terbaru)"
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pasang arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Pasang ESP32 core
+        run: |
+          CORE="${{ github.event.inputs.esp32_core }}"
+          CORE="${CORE:-2.0.17}"
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@${CORE}"
+
+      - name: Pasang library
+        run: |
+          GFX="${{ github.event.inputs.gfx_version }}"
+          if [ -n "$GFX" ]; then
+            arduino-cli lib install "GFX Library for Arduino@${GFX}"
+          else
+            arduino-cli lib install "GFX Library for Arduino"
+          fi
+          arduino-cli lib install "ChronosESP32"
+
+      - name: Siapkan folder sketch
+        run: |
+          mkdir -p motor_nav_esp32_v22
+          cp motor_nav_esp32_v22.ino partitions.csv standby_photo.h motor_nav_esp32_v22/
+          ls -la motor_nav_esp32_v22
+
+      - name: Compile (ESP32 Dev Module, flash 4MB, partisi custom)
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32:FlashSize=4M \
+            --export-binaries \
+            --output-dir out \
+            motor_nav_esp32_v22
+          ls -la out
+
+      - name: Unggah hasil
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32
+          path: |
+            out/*.merged.bin
+            out/*.bin
