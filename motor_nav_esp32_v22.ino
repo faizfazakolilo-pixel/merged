@@ -1,4 +1,9 @@
 /*
+  v22.13: UPLOAD WALLPAPER (FOTO) LEWAT BLUETOOTH dari aplikasi MotorNav, tanpa mode WiFi. Paket kontrol baru pada karakteristik
+  peta: [0xFF][0x10][ukuran u32] mulai (ESP32 menghapus slot), [0xFF][0x11][offset u32][data...] isi, [0xFF][0x12][crc32 u32] selesai.
+  Isi = 240x240 RGB565 little-endian (115200 byte), sama dengan unggahan WiFi. Status dibaca aplikasi dari karakteristik yang sama
+  (1 byte: 0 diam, 1 menghapus, 2 siap, 3 menerima, 4 sukses, 5 gagal). Foto langsung tampil tanpa restart. Jalur WiFi tetap ada.
+
   v22.12: APLIKASI ANDROID MotorNav menggantikan Chronos. Aplikasi memakai layanan BLE peta yang sama (UUID 4d4e0001/0002),
   menggambar peta + banner belokan + kecepatan + ETA di HP lalu mengirim JPEG 240x240 (layar penuh). Ditambah paket kontrol
   [0xFF][cmd]: jam (cmd 1) dan status navigasi/heartbeat (cmd 2). Chronos tetap bisa dipakai seperti sebelumnya.
@@ -601,6 +606,12 @@ uint8_t navStyle = 0;                                              // 0 = peta (
 bool mapDecode(const uint8_t *p, uint32_t len);                   // didefinisikan di bagian video (dekoder JPEG ROM)
 
 #if MAP_BLE
+void bleWpBegin(uint32_t size);                                    // v22.13: upload wallpaper lewat BLE (didefinisikan dekat wallpaperLoad)
+void bleWpData(uint32_t off, const uint8_t *d, size_t n);
+void bleWpEnd(uint32_t crc);
+void bleWpTick();
+bool bleWpBusy();
+static NimBLECharacteristic *mapChr = nullptr;
 // Frame peta dari HP: paket = [id u8][offset u16 LE][total u16 LE][data...]; frame lengkap -> JPEG 240x240.
 #define MAP_SVC_UUID "4d4e0001-7a1e-4c1b-9d52-6f2d4e1a0001"
 #define MAP_CHR_UUID "4d4e0002-7a1e-4c1b-9d52-6f2d4e1a0001"
@@ -623,8 +634,12 @@ class MapCharCb : public NimBLECharacteristicCallbacks {
     if (n >= 3 && d[0] == 0xFF) {                                  // paket kontrol dari aplikasi MotorNav
       if (d[1] == 1 && n >= 5) { appH = d[2]; appM = d[3]; appS = d[4]; appClockMs = millis(); appClockNew = true; }
       else if (d[1] == 2) { appNav = d[2] != 0; appStamp = millis(); }
+      else if (d[1] == 0x10 && n >= 6) bleWpBegin(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24));
+      else if (d[1] == 0x11 && n >= 7) bleWpData(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24), d + 6, n - 6);
+      else if (d[1] == 0x12 && n >= 6) bleWpEnd(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24));
       return;
     }
+    if (bleWpBusy()) return;                                       // sedang upload wallpaper: frame peta diabaikan
     if (n < 6 || !mapBuf[0] || !mapBuf[1]) return;
     uint8_t fid = d[0];
     uint16_t off = d[1] | (d[2] << 8), tot = d[3] | (d[4] << 8);
@@ -3671,6 +3686,86 @@ void settingsAction() {                                            // dipanggil 
   setDirty = true;
 }
 
+#if MAP_BLE
+// ---------- v22.13: upload wallpaper (foto 240x240 RGB565) lewat BLE ----------
+// Status (dibaca aplikasi): 0 diam, 1 menghapus, 2 siap, 3 menerima, 4 sukses, 5 gagal.
+static volatile uint8_t wpUp = 0;
+static volatile bool wpUpReq = false, wpUpErasing = false, wpUpReload = false;
+static uint32_t wpUpExp = 0, wpUpFlushed = 0, wpUpEr = 0, wpUpCrc = 0;
+static uint16_t wpUpFill = 0;
+static volatile uint32_t wpUpLast = 0;                              // aktivitas terakhir (batas waktu 10 dtk)
+#define WPU_BYTES (240 * 240 * 2)
+
+static void wpUpSet(uint8_t st) {
+  wpUp = st;
+  if (mapChr) mapChr->setValue(&st, 1);
+}
+
+static uint32_t wpCrc(uint32_t c, const uint8_t *p, size_t n) {    // CRC-32 standar (sama dengan java.util.zip.CRC32)
+  while (n--) { c ^= *p++; for (int k = 0; k < 8; k++) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u))); }
+  return c;
+}
+
+bool bleWpBusy() { return wpUp >= 1 && wpUp <= 3; }
+
+void bleWpBegin(uint32_t size) {                                   // dipanggil dari tugas BLE
+  if (size != WPU_BYTES || !photoPart() || !mapBuf[0]) { wpUpSet(5); return; }
+  wpUpExp = 0; wpUpFlushed = 0; wpUpFill = 0; wpUpCrc = 0xFFFFFFFFu;
+  mapFid = 255; mapGot = 0; mapTot = 0;
+  wpUpLast = millis();
+  wpUpSet(1);
+  wpUpReq = true;                                                  // penghapusan dikerjakan di loop() agar tugas BLE tidak tertahan
+}
+
+static bool wpUpFlush() {                                          // tulis penyangga (mapBuf[0]) ke flash, mulai offset 16
+  if (!wpUpFill) return true;
+  if (esp_partition_write(photoPart(), 16 + wpUpFlushed, mapBuf[0], wpUpFill) != ESP_OK) return false;
+  wpUpFlushed += wpUpFill; wpUpFill = 0;
+  return true;
+}
+
+void bleWpData(uint32_t off, const uint8_t *d, size_t n) {
+  if (wpUp != 2 && wpUp != 3) return;
+  wpUpLast = millis();
+  if (off < wpUpExp) return;                                       // paket ganda (kirim ulang): abaikan
+  if (off != wpUpExp || off + n > WPU_BYTES) { wpUpSet(5); return; }
+  wpUpCrc = wpCrc(wpUpCrc, d, n);
+  size_t i = 0;
+  while (i < n) {
+    size_t k = n - i; if (k > 4096u - wpUpFill) k = 4096u - wpUpFill;
+    memcpy(mapBuf[0] + wpUpFill, d + i, k);
+    wpUpFill += k; i += k;
+    if (wpUpFill == 4096 && !wpUpFlush()) { wpUpSet(5); return; }
+  }
+  wpUpExp += n;
+  if (wpUp == 2) wpUpSet(3);
+}
+
+void bleWpEnd(uint32_t crc) {
+  if (wpUp != 3 || wpUpExp != WPU_BYTES || !wpUpFlush() || (~wpUpCrc) != crc) { wpUpSet(5); return; }
+  uint8_t hd[16]; memcpy(hd, PHOTO_MAGIC, 8); memset(hd + 8, 0xFF, 8);   // tanda sah ditulis paling akhir
+  if (esp_partition_write(photoPart(), 0, hd, 16) != ESP_OK) { wpUpSet(5); return; }
+  wpUpReload = true;                                               // petakan ulang di loop()
+  wpUpSet(4);
+}
+
+void bleWpTick() {                                                 // dipanggil dari loop()
+  if (bleWpBusy() && !wpUpErasing && !wpUpReq && millis() - wpUpLast > 10000) wpUpSet(5);   // HP hilang di tengah upload: lepas kunci frame peta
+  if (wpUpReq) {
+    wpUpReq = false;
+    if (wpMapped) { WP_UNMAP(wpH); wpMapped = false; }            // lepas pemetaan flash sebelum dihapus
+    photoPtr = STANDBY_PHOTO; vidOK = false;
+    wpUpEr = 0; wpUpErasing = true;
+  }
+  if (wpUpErasing) {
+    if (esp_partition_erase_range(photoPart(), wpUpEr, 4096) != ESP_OK) { wpUpErasing = false; wpUpSet(5); return; }
+    wpUpEr += 4096;
+    if (wpUpEr >= PHOTO_ERASE) { wpUpErasing = false; wpUpLast = millis(); wpUpSet(2); }
+  }
+  if (wpUpReload) { wpUpReload = false; wallpaperLoad(); Serial.println("Wallpaper dari BLE tersimpan"); }
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_TOUCH, INPUT);
@@ -3735,8 +3830,10 @@ void setup() {
   NimBLEDevice::init("Motor Nav");                                 // layanan peta ditambah sebelum Chronos memulai server
   NimBLEServer *msrv = NimBLEDevice::createServer();
   NimBLEService *msvc = msrv->createService(MAP_SVC_UUID);
-  NimBLECharacteristic *mch = msvc->createCharacteristic(MAP_CHR_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  NimBLECharacteristic *mch = msvc->createCharacteristic(MAP_CHR_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ);
   mch->setCallbacks(&mapCharCb);
+  mapChr = mch;
+  { uint8_t z = 0; mch->setValue(&z, 1); }                         // status upload wallpaper: 0 = diam
   msvc->start();
 #endif
   watch.setNotificationCallback(onNotify);
@@ -3906,6 +4003,7 @@ void loop() {
   tiltTick();                                                      // sudut miring dibaca terus di semua mode
 
 #if MAP_BLE
+  bleWpTick();
   {
     static uint32_t advT = 0;                                      // iklan tetap menyala selama koneksi < 2 (HP Chronos + HP-peta)
     if (millis() - advT > 2000) {
