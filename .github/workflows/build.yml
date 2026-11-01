@@ -55,10 +55,32 @@ jobs:
         run: |
           arduino-cli compile \
             --fqbn esp32:esp32:esp32:FlashSize=4M \
+            --build-property upload.maximum_size=1703936 \
             --export-binaries \
             --output-dir out \
             motor_nav_esp32_v22
           ls -la out
+
+      - name: Periksa tabel partisi di hasil build
+        run: |
+          python3 - << 'PY'
+          import glob, struct, sys
+          f = glob.glob("out/*.partitions.bin")[0]
+          d = open(f, "rb").read()
+          ok = False
+          for i in range(0, len(d), 32):
+              e = d[i:i+32]
+              if len(e) < 32 or e[:2] != b"\xaa\x50":
+                  continue
+              typ, sub, off, size = struct.unpack("<BBII", e[2:12])
+              name = e[12:28].split(b"\0")[0].decode()
+              print(f"{name:8s} type={typ} sub={sub} offset=0x{off:X} size=0x{size:X}")
+              if name == "app0" and size == 0x1A0000:
+                  ok = True
+          if not ok:
+              print("PERINGATAN: partisi app0 bukan 0x1A0000, partitions.csv tidak terpakai!")
+              sys.exit(1)
+          PY
 
       - name: Unggah hasil
         uses: actions/upload-artifact@v4
