@@ -42,6 +42,15 @@ jobs:
           cp motor_nav_esp32_v22.ino partitions.csv standby_photo.h motor_nav_esp32_v22/
           ls -la motor_nav_esp32_v22
 
+      - name: Tambal kompatibilitas core 2.x (ESP-IDF 4)
+        run: |
+          CORE="${{ github.event.inputs.esp32_core }}"
+          CORE="${CORE:-2.0.17}"
+          case "$CORE" in
+            2.*) sed -i 's/ESP_PARTITION_MMAP_DATA/SPI_FLASH_MMAP_DATA/g' motor_nav_esp32_v22/motor_nav_esp32_v22.ino ;;
+          esac
+          grep -n "MMAP_DATA" motor_nav_esp32_v22/motor_nav_esp32_v22.ino
+
       - name: Compile (ESP32 Dev Module, flash 4MB, partisi custom)
         run: |
           arduino-cli compile \
