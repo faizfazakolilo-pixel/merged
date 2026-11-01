@@ -1,4 +1,63 @@
 /*
+  v22.26: PARTISI WALLPAPER DIPERBESAR. Program (app0) dipersempit ke 1,25 MB (0x140000), animasi boot 512 KB (0x80000), sisanya untuk wallpaper:
+  2,19 MB (0x230000). Bila kompilasi gagal dengan pesan "Sketch too big / text section exceeds available space", program tidak muat: beri tahu
+  ukuran "Sketch uses ... bytes" supaya pembagian partisi disesuaikan. WAJIB flash ulang penuh (alamat 0x0) dengan partitions.csv baru.
+
+  v22.25: ANIMASI BOOT + LAYAR "KANVAS OK" DIHAPUS. Layar diagnostik 2 detik ("KANVAS OK / heap bebas / video ya") saat LCD menyala sudah dihapus
+  (bila kanvas gagal dialokasi hanya muncul peringatan merah singkat; detailnya tetap di Serial). Saat sistem dinyalakan, firmware memutar VIDEO yang
+  dikirim dari aplikasi MotorNav (menu Layar > Animasi boot), lalu masuk ke tampilan biasa. Disimpan di partisi data KEDUA "bootanim" (format
+  sama dengan video wallpaper "MNVIDEO2"), jadi wallpaper tetap terpisah. Sentuh sensor setelah 0,4 dtk = lewati animasi. Slot kosong = tanpa animasi.
+  PARTISI BERUBAH (lihat v22.26). WAJIB flash ulang penuh memakai partitions.csv baru
+  (Arduino IDE: otomatis dipakai dari folder sketch). Paket BLE baru: [0xFF][0x14][ukuran u32] mulai upload animasi boot (data/akhir memakai 0x11/0x12
+  yang sama), [0xFF][0x17] kosongkan animasi boot. Status upload dibaca dari karakteristik yang sama (2 siap, 4 sukses, 5 gagal).
+
+  v22.24: SLIDER MUSIK + KECERAHAN. Paket [0xFF][0x29][pos u16 dtk][dur u16 dtk] dari HP (tiap ~3 dtk / saat geser) -> progress bar bergelombang di
+  standby foto/video: bagian yang sudah diputar bergelombang putih mengalir, sisanya garis datar abu-abu, waktu berjalan & durasi di bawahnya.
+  Pengaturan ke-11 (cfg[10]) = KECERAHAN LAYAR 10-100%: modul tanpa pin BL, jadi diredupkan lewat perangkat lunak tepat sebelum dikirim ke panel.
+
+  v22.23: PENGATURAN DARI APLIKASI. Paket [0xFF][0x28][v0..v9] (10 byte, tiap nilai dibatasi min/maks), disimpan di NVS (kunci "cfg") sehingga
+  tetap ada setelah mati-hidup; HP mengirimnya tiap tersambung dan tiap diubah. Urutan: 0 transparansi sampul(0-255) 1 sampul on 2 keputihan jam(40-255)
+  3 visualizer on 4 tinggi batang(%) 5 keterlihatan batang(%) 6 kecepatan cincin(%) 7 kartu pemutar on 8 detik masuk standby 9 wajah menari saat lagu.
+
+  v22.22: CHRONOS DIHAPUS TOTAL (library ChronosESP32, penerima navigasi/notifikasi/telepon/musik/jam Chronos). Server BLE kini dibuat sendiri
+  (layanan 4d4e0001) dan hanya melayani aplikasi MotorNav. Info lagu dan jam hanya dari aplikasi.
+  VISUALIZER ASLI: paket [0xFF][0x25][n][band0..band(n-1)] (n=16, 0..255, bass dulu) dari HP ~20x/dtk -> batang visualizer mengikuti suara lagu.
+  Bila paket tak datang (>0,6 dtk) visualizer kembali ke simulasi. Wajah standby juga ikut berdenyut mengikuti bass.
+  GAMBAR SAMPUL: paket [0xFF][0x26][off u16][data] (64x64 RGB565 LE, 8192 byte) lalu [0xFF][0x27][1] = tampil. Digambar semi-transparan
+  di atas jam pada standby foto/video; hilang saat lagu berganti/jeda sampai sampul baru tiba.
+
+  v22.21: MUSIK DARI APLIKASI MotorNav. Paket baru [0xFF][0x24][state][titleLen][artistLen][judul][artis] (state 1 = diputar, 0 = jeda/berhenti),
+  dikirim HP tiap kali berubah + tiap ~4 dtk. Dipakai sebagai sumber info lagu (menggantikan Chronos bila segar < 15 dtk), sehingga animasi musik
+  muncul di KEDUA mode standby: wajah (mulai langsung menari/not melayang, aksi musik/dance lebih sering) dan foto/video (visualizer + kartu pemutar).
+
+  v22.20: ANTREAN NOTIFIKASI. HP menahan notifikasi berikutnya sampai ESP32 selesai menampilkan yang sekarang (kabar notify [0xE1][0x02] dikirim
+  firmware tiap layar notifikasi berakhir/ditutup). Flags paket teks bit 2-4 = jumlah yang masih antre -> lencana "+N" oranye di dekat logo.
+
+  v22.19: TOLAK TELEPON DARI SENSOR: tahan 0,7 dtk di layar telepon -> firmware mengirim notify [0xE1][0x01] ke HP (karakteristik peta kini punya NOTIFY).
+  Telepon tak terjawab tampil sebagai notifikasi dari HP.
+
+  v22.18: sentuhan dari standby hanya membuka MODE GAME (tidak ada halaman Navigasi/Jam di putaran sentuhan); halaman Navigasi muncul otomatis
+  saat navigasi dimulai di aplikasi, dan begitu navigasi selesai layar langsung kembali ke wajah/wallpaper standby.
+
+  v22.17: MODE BERKENDARA. Bit 1 pada flags paket teks notifikasi (0x20) = HP sedang navigasi: notifikasi tampil 4,5 dtk, satu halaman (4 baris), bunyi pendek.
+
+  v22.16: wajah standby tidak lagi tidur: tak ada mengantuk/menguap/tidur, aksi acak terus berganti (saklar FACE_SLEEP).
+
+  v22.15: NOTIFIKASI & TELEPON DARI APLIKASI MotorNav (tanpa Chronos). Paket kontrol baru pada karakteristik peta:
+  [0xFF][0x20][off u16][tot u16][data] teks notifikasi ([flags][appLen][titleLen][app][judul][pesan], dipotong-potong),
+  [0xFF][0x21][off u16][data] logo aplikasi 48x48 RGB565 little-endian (4608 byte; 0x0000 = transparan),
+  [0xFF][0x22][labelLen][nameLen][label][nama][nomor] telepon masuk, [0xFF][0x23] telepon selesai.
+  Layar notifikasi baru: logo asli aplikasi di atas, nama aplikasi (chip), pengirim (ukuran 2), isi pesan ukuran 2
+  (14 huruf x 4 baris per halaman) yang berganti halaman otomatis tiap 3,4 dtk; lama tampil menyesuaikan panjang pesan
+  (7-26 dtk). Tanpa logo: huruf pertama nama aplikasi. Layar telepon: nama kontak besar (2 baris), nomor di bawahnya,
+  label (mis. WhatsApp); berhenti otomatis maks 60 dtk. Notifikasi/telepon dari Chronos tetap berfungsi.
+*/
+/*
+  v22.14: UPLOAD WIFI DIHAPUS (library WiFi/WebServer tidak dipakai lagi: flash & RAM lebih lega). Foto DAN video wallpaper kini
+  diunggah dari aplikasi MotorNav lewat Bluetooth. Protokol: [0xFF][0x10][ukuran u32] mulai, [0xFF][0x11][offset u32][data...],
+  [0xFF][0x12][crc32 u32] selesai, [0xFF][0x13] kosongkan slot. Data = citra lengkap isi partisi dari offset 0 (foto "MNPHOTO1"
+  atau video "MNVIDEO2"); sektor flash dihapus tepat sebelum ditulis. Menu pengaturan item pertama kini WALLPAPER (hanya info isi slot).
+
   v22.13: UPLOAD WALLPAPER (FOTO) LEWAT BLUETOOTH dari aplikasi MotorNav, tanpa mode WiFi. Paket kontrol baru pada karakteristik
   peta: [0xFF][0x10][ukuran u32] mulai (ESP32 menghapus slot), [0xFF][0x11][offset u32][data...] isi, [0xFF][0x12][crc32 u32] selesai.
   Isi = 240x240 RGB565 little-endian (115200 byte), sama dengan unggahan WiFi. Status dibaca aplikasi dari karakteristik yang sama
@@ -93,7 +152,7 @@
   1 menit, merah saat Bluetooth terputus). Sentuh TP223 untuk bangun.
   Saat navigasi dimulai, layar bangun sendiri.
 
-  Library: ChronosESP32, GFX Library for Arduino
+  Library: GFX Library for Arduino, NimBLE-Arduino 2.x
   Board ESP32 biasa : "ESP32 Dev Module"
     Pin: SCK 18, MOSI 23, CS 5, DC 2, RST 4, TP223 OUT 27, BL ke 3V3, VCC ke 3V3, GND ke GND
     (jangan pakai GPIO 6-11, itu terhubung ke flash di ESP32 biasa)
@@ -196,13 +255,11 @@
 */
 
 #include <Arduino_GFX_Library.h>
-#include <ChronosESP32.h>
+#include <NimBLEDevice.h>
 #include <math.h>
 #include <Wire.h>
 #include <Preferences.h>
 #include "standby_photo.h"
-#include <WiFi.h>
-#include <WebServer.h>
 #include <esp_partition.h>
 #include <esp_idf_version.h>
 #if __has_include(<rom/tjpgd.h>)
@@ -238,10 +295,10 @@
   #define PIN_SCL   22
 #endif
 
-#if !CONFIG_IDF_TARGET_ESP32C3 && HAVE_ROM_JPEG
-  #define MAP_BLE 1          // peta asli dari HP lewat BLE (butuh RAM ~30 KB: hanya untuk ESP32 biasa)
+#if HAVE_ROM_JPEG
+  #define MAP_BLE 1          // v22.22: BLE ke aplikasi MotorNav = satu-satunya jalur data (butuh RAM ~40 KB)
 #else
-  #define MAP_BLE 0
+  #error "Butuh dekoder JPEG ROM (ESP32 / ESP32-S3 / C3 dengan Arduino-ESP32 core 3.x)"
 #endif
 
 #define ICON_MSB_FIRST   true   // ubah ke false jika arah dari ikon salah baca
@@ -251,7 +308,12 @@
 #define NEAR_M           100.0f
 
 #define STANDBY_MS       20000UL   // masuk standby setelah tanpa navigasi selama ini
-#define SLEEP_MS         60000UL   // wajah tertidur setelah standby selama ini
+#define FACE_SLEEP       false     // false: wajah standby TIDAK PERNAH tidur (animasi terus berganti); true: tidur seperti dulu
+#if FACE_SLEEP
+  #define SLEEP_MS       60000UL   // wajah tertidur setelah standby selama ini
+#else
+  #define SLEEP_MS       0x7FFFFFFFUL   // ~24 hari = praktis tidak pernah mengantuk/menguap/tidur
+#endif
 
 #define NOTIF_MS         8000UL    // lama animasi notifikasi (cukup untuk membaca isi pesan)
 #define FRAME_MS         8         // jeda minimal antar frame animasi (8 = batas ~120 fps)
@@ -367,7 +429,38 @@ inline void useClip(uint8_t) {}
 #endif
 void asciiClean(const String &in, char *out, size_t cap);   // didefinisikan di bagian notifikasi
 
-ChronosESP32 watch("Motor Nav");
+// v22.22: pengganti tipe Navigation milik library Chronos. active diisi dari aplikasi MotorNav (appNavOn); sisanya selalu kosong
+// karena banner/peta digambar HP.
+struct Navigation {
+  bool active = false, hasIcon = false;
+  String title, directions, distance, speed, eta, duration;
+  uint8_t icon[288];
+  uint32_t iconCRC = 0;
+  Navigation() { memset(icon, 0, sizeof(icon)); }
+};
+
+// v22.22: audio & sampul dari aplikasi
+#define ART_W      64
+#define ART_BYTES  (ART_W * ART_W * 2)
+static uint16_t *artBuf = nullptr;
+static volatile uint16_t artGot = 0;
+static volatile bool artOn = false;
+#define CFG_N 11
+static uint8_t cfg[CFG_N]           = {140, 1,  200, 1, 100, 100, 100, 1,  20,  1, 100};
+static const uint8_t CFG_MIN[CFG_N] = {0,   0,  40,  0, 20,  20,  0,   0,  5,   0, 10};
+static const uint8_t CFG_MAX[CFG_N] = {255, 1,  255, 1, 200, 200, 200, 1,  120, 1, 100};
+static uint16_t dimK = 256;                                        // kecerahan layar 0..256 (256 = penuh, tanpa pengolahan)
+static volatile uint32_t cfgDirtyAt = 0;                           // millis() perubahan terakhir (0 = tak ada yang perlu disimpan)
+static void cfgClamp() { for (int i = 0; i < CFG_N; i++) cfg[i] = constrain(cfg[i], CFG_MIN[i], CFG_MAX[i]); dimK = (uint16_t)(cfg[10] * 256 / 100); }
+static uint8_t  audBands[16];
+static volatile uint16_t musPosS = 0, musDurS = 0;                 // posisi & durasi lagu (detik) dari HP
+static volatile uint32_t musPosAt = 0;                             // millis() saat posisi diterima (0 = belum ada)
+static volatile uint32_t audStamp = 0;                             // millis() paket spektrum terakhir (0 = belum pernah)
+static inline bool audFresh() { return audStamp != 0 && millis() - audStamp < 600; }
+static float audBass() {                                           // 0..1 dari 3 band terendah, atau -1 bila tak ada data
+  if (!audFresh()) return -1.0f;
+  return (audBands[0] + audBands[1] + audBands[2]) / (3.0f * 255.0f);
+}
 
 // v22.12: HP memakai aplikasi MotorNav (bukan Chronos). Paket kontrol dari aplikasi: [0xFF][cmd][...]
 //   cmd 1 = jam  [jam][menit][detik]   cmd 2 = status [navAktif 0/1] (dikirim tiap ~2 dtk = tanda aplikasi tersambung)
@@ -378,7 +471,7 @@ volatile uint8_t  appH = 0, appM = 0, appS = 0;
 volatile uint32_t appClockMs = 0;
 static inline bool appLinked() { return appStamp != 0 && millis() - appStamp < 8000; }
 static inline bool appNavOn()  { return appLinked() && appNav; }
-static inline bool isLinked()  { return watch.isConnected() || appLinked(); }
+static inline bool isLinked()  { return appLinked(); }
 
 enum Page { PAGE_NAV, PAGE_GAME, PAGE_GAME2, PAGE_GAME3, PAGE_COUNT };
 enum Mood { MOOD_HAPPY, MOOD_SLEEP, MOOD_OFF };
@@ -405,14 +498,31 @@ bool     faceConnected = true;
 
 // Notifikasi
 volatile bool notifPending = false;
-char     notifApp[32] = "", notifTitle[40] = "", notifMsg[120] = "";
+char     notifApp[32] = "", notifTitle[48] = "", notifMsg[232] = "";
 bool     notifActive = false;
 uint32_t notifStart = 0, lastNotifFrame = 0;
 long     lastNotifRing = -1;
 uint8_t  notifStyle = 0, notifCount = 0;                // 0 lonceng, 1 chat, 2 amplop
 // Panggilan masuk
 volatile bool callStartPending = false, callEndPending = false;
-char     callName[24] = "";
+char     callName[40] = "", callNum[24] = "", callLabel[24] = "";
+// v22.15: notifikasi/telepon dari aplikasi MotorNav lewat BLE (logo asli aplikasi + teks panjang bergulir)
+#define ICON_W        48                                           // logo aplikasi 48x48 RGB565 (4608 byte), 0x0000 = transparan
+#define ICON_BYTES    (ICON_W * ICON_W * 2)
+#define NT_W          14                                           // huruf per baris (ukuran 2 = 12 px/huruf, 168 px)
+#define NT_ROWS       4                                            // baris per halaman
+#define NT_LINES      20                                           // maks baris tersimpan (5 halaman)
+#define NT_PAGE_MS    3400UL                                       // lama tiap halaman pesan
+static uint16_t *iconBuf = nullptr;
+static volatile uint16_t iconGot = 0;                              // byte logo yang sudah diterima
+static char stApp[32] = "", stTitle[48] = "", stMsg[232] = "";     // penampung dari BLE (diambil saat startNotif)
+static volatile bool stValid = false, stIcon = false, stDrive = false;
+static volatile uint8_t stMore = 0;                                // jumlah notifikasi yang masih menunggu di antrean HP
+static uint8_t notifMore = 0;
+static bool notifHasIcon = false, notifDrive = false;   // notifDrive: mode berkendara (singkat, 1 halaman)
+static char ntLines[NT_LINES][16];
+static int  ntNL = 0, ntPages = 1;
+static uint32_t notifDur = 8000;
 bool     callActive = false;
 uint32_t callStart = 0, lastCallFrame = 0;
 long     lastCallRing = -1;
@@ -606,12 +716,23 @@ uint8_t navStyle = 0;                                              // 0 = peta (
 bool mapDecode(const uint8_t *p, uint32_t len);                   // didefinisikan di bagian video (dekoder JPEG ROM)
 
 #if MAP_BLE
-void bleWpBegin(uint32_t size);                                    // v22.13: upload wallpaper lewat BLE (didefinisikan dekat wallpaperLoad)
+void bleNotifText(uint16_t off, uint16_t tot, const uint8_t *d, size_t n);   // v22.15
+void bleIconData(uint16_t off, const uint8_t *d, size_t n);
+void bleCallStart(const uint8_t *d, size_t n);
+void bleCallEnd();
+void bleWpBegin(uint32_t size, uint8_t tgt = 0);                                    // v22.13: upload wallpaper lewat BLE (didefinisikan dekat wallpaperLoad)
 void bleWpData(uint32_t off, const uint8_t *d, size_t n);
 void bleWpEnd(uint32_t crc);
+void bleWpClear(uint8_t tgt = 0);
 void bleWpTick();
 bool bleWpBusy();
 static NimBLECharacteristic *mapChr = nullptr;
+// v22.21: info lagu dari aplikasi (diisi di callback BLE, dibaca pollMusic)
+static char appMusTitle[64] = "", appMusArtist[48] = "";
+static volatile uint8_t  appMusState = 0;
+static volatile uint32_t appMusStamp = 0;                          // millis() paket musik terakhir (0 = belum pernah)
+static volatile bool     appMusNew = false;
+void bleSendEvent(uint8_t code);                                   // v22.19: kabar ke HP lewat notify: [0xE1][kode], kode 1 = tolak telepon
 // Frame peta dari HP: paket = [id u8][offset u16 LE][total u16 LE][data...]; frame lengkap -> JPEG 240x240.
 #define MAP_SVC_UUID "4d4e0001-7a1e-4c1b-9d52-6f2d4e1a0001"
 #define MAP_CHR_UUID "4d4e0002-7a1e-4c1b-9d52-6f2d4e1a0001"
@@ -636,6 +757,41 @@ class MapCharCb : public NimBLECharacteristicCallbacks {
       else if (d[1] == 2) { appNav = d[2] != 0; appStamp = millis(); }
       else if (d[1] == 0x10 && n >= 6) bleWpBegin(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24));
       else if (d[1] == 0x11 && n >= 7) bleWpData(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24), d + 6, n - 6);
+      else if (d[1] == 0x13) bleWpClear(0);
+      else if (d[1] == 0x14 && n >= 6) bleWpBegin(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24), 1);   // v22.25: animasi boot
+      else if (d[1] == 0x17) bleWpClear(1);
+      else if (d[1] == 0x20 && n >= 7) bleNotifText(d[2] | (d[3] << 8), d[4] | (d[5] << 8), d + 6, n - 6);   // teks notifikasi (berpotong-potong)
+      else if (d[1] == 0x21 && n >= 5) bleIconData(d[2] | (d[3] << 8), d + 4, n - 4);                        // logo aplikasi
+      else if (d[1] == 0x22 && n >= 4) bleCallStart(d + 2, n - 2);                                          // telepon masuk
+      else if (d[1] == 0x23) bleCallEnd();
+      else if (d[1] == 0x24 && n >= 5) {                                                                    // v22.21: info lagu dari HP
+        size_t tl = d[3], al = d[4];
+        if (tl > 63) tl = 63;
+        if (al > 47) al = 47;
+        if (5 + tl > n) tl = n - 5;
+        if (5 + tl + al > n) al = n - 5 - tl;
+        if (strlen(appMusTitle) != tl || memcmp(appMusTitle, d + 5, tl) != 0) { artOn = false; musPosS = 0; musDurS = 0; musPosAt = millis(); }   // lagu berganti: sampul lama dibuang
+        memcpy(appMusTitle, d + 5, tl); appMusTitle[tl] = 0;
+        memcpy(appMusArtist, d + 5 + tl, al); appMusArtist[al] = 0;
+        appMusState = d[2];
+        appMusStamp = millis();
+        appMusNew = true;
+      }
+      else if (d[1] == 0x29 && n >= 6) { musPosS = d[2] | (d[3] << 8); musDurS = d[4] | (d[5] << 8); musPosAt = millis(); }   // posisi lagu
+      else if (d[1] == 0x25 && n >= 3) {                                                                    // v22.22: spektrum audio asli
+        size_t k = d[2]; if (k > 16) k = 16; if (k > n - 3) k = n - 3;
+        if (k >= 4) { for (size_t i = 0; i < 16; i++) audBands[i] = d[3 + (i * k) / 16]; audStamp = millis(); }
+      }
+      else if (d[1] == 0x28 && n >= 3) {                                                                    // v22.23: pengaturan dari aplikasi
+        size_t k = n - 2; if (k > CFG_N) k = CFG_N;
+        memcpy(cfg, d + 2, k); cfgClamp(); cfgDirtyAt = millis();
+      }
+      else if (d[1] == 0x26 && n >= 5 && artBuf) {                                                          // sampul album (berurutan)
+        uint16_t off = d[2] | (d[3] << 8); size_t k = n - 4;
+        if (off == 0) { artGot = 0; artOn = false; }
+        if (off == artGot && (size_t)off + k <= ART_BYTES) { memcpy((uint8_t *)artBuf + off, d + 4, k); artGot = off + k; }
+      }
+      else if (d[1] == 0x27 && n >= 3) artOn = (d[2] != 0) && artBuf && artGot >= ART_BYTES;                                                                  // telepon selesai
       else if (d[1] == 0x12 && n >= 6) bleWpEnd(d[2] | (d[3] << 8) | (d[4] << 16) | ((uint32_t)d[5] << 24));
       return;
     }
@@ -657,18 +813,13 @@ class MapCharCb : public NimBLECharacteristicCallbacks {
 };
 static MapCharCb mapCharCb;
 
-// Chronos menganggap tiap koneksi = HP Chronos. Koneksi HP-peta tidak boleh mengubah status "Chronos tersambung".
 class MapSrvCb : public NimBLEServerCallbacks {
-  void onConnect(NimBLEServer *s, NimBLEConnInfo &ci) override {
-    mapTotalConn++;
-    static_cast<NimBLEServerCallbacks &>(watch).onConnect(s, ci);
-  }
+  void onConnect(NimBLEServer *s, NimBLEConnInfo &ci) override { mapTotalConn++; }
   void onDisconnect(NimBLEServer *s, NimBLEConnInfo &ci, int reason) override {
     if (mapTotalConn > 0) mapTotalConn--;
     if ((int)ci.getConnHandle() == mapConn) { mapConn = -1; mapStamp = 0; }
-    int chronosConns = mapTotalConn - (mapConn >= 0 ? 1 : 0);
-    if (chronosConns <= 0) static_cast<NimBLEServerCallbacks &>(watch).onDisconnect(s, ci, reason);
-    else NimBLEDevice::startAdvertising();
+    appStamp = 0; appMusStamp = 0; audStamp = 0; artOn = false;   // HP putus: semua status dari HP dianggap hilang
+    NimBLEDevice::startAdvertising();
   }
 };
 static MapSrvCb mapSrvCb;
@@ -791,8 +942,8 @@ void drawNavPage(const Navigation &nav, bool connected) {
       drawCentered("Pilih", 85, 3, COL_TEXT);
       drawCentered("tujuan di aplikasi", 118, 2, COL_DIM);
     } else {
-      drawCentered("Buka", 85, 3, COL_TEXT);
-      drawCentered("Google Maps", 118, 2, COL_DIM);
+      drawCentered("Hubungkan", 85, 3, COL_TEXT);
+      drawCentered("aplikasi", 118, 3, COL_DIM);
     }
     drawPageDots();
     return;
@@ -1785,8 +1936,9 @@ void faceTargets(uint32_t now, int mood, uint32_t st) {
       break;
     case EV_MUSIC:
       Ft.happy = 1; Ft.smile = 1; Ft.blush = 0.8f; Ft.lookX = 0; Ft.lookY = 0;
-      Ft.shake = sinf(p * 0.008f) * 6.0f;
-      Ft.jump = -fabsf(sinf(p * 0.008f)) * 4.0f;
+      { float bl = audBass(); float k = (bl >= 0.0f) ? (0.25f + 1.5f * bl) : 1.0f;   // v22.22: lompat mengikuti bass lagu
+        Ft.shake = sinf(p * 0.008f) * 6.0f * k;
+        Ft.jump = -fabsf(sinf(p * 0.008f)) * 4.0f * k; }
       break;
     case EV_COOL:
       Ft.smile = 0.9f; Ft.blush = 0.2f; Ft.lookX = 0; Ft.lookY = 0;
@@ -1965,7 +2117,7 @@ void faceTargets(uint32_t now, int mood, uint32_t st) {
   }
 }
 
-// ---------- Info lagu (pemutar di HP lewat Chronos) ----------
+// ---------- Info lagu (dari aplikasi MotorNav) ----------
 char musicTxt[100] = "", musicTitle[64] = "", musicArtist[48] = "";
 bool musicOn = false;
 uint32_t musicElapsed = 0, musicTickAt = 0;                       // detik lagu berjalan (perkiraan, dihitung sejak lagu terdeteksi)
@@ -1978,16 +2130,22 @@ void pollMusic(bool connected) {                                  // dipanggil t
   if (now - last < 500) return;
   last = now;
   if (!connected) { musicOn = false; return; }
-  MusicInfo &m = watch.getMusicInfo();
   char nt[64], na[48];
-  asciiClean(m.title, nt, sizeof(nt));
-  asciiClean(m.artist, na, sizeof(na));
+  bool playing = false;
+  if (appMusStamp != 0 && now - appMusStamp < 15000UL) {          // sumber satu-satunya: aplikasi MotorNav
+    appMusNew = false;
+    asciiClean(appMusTitle, nt, sizeof(nt));
+    asciiClean(appMusArtist, na, sizeof(na));
+    playing = (appMusState != 0);
+  } else {
+    nt[0] = 0; na[0] = 0;
+  }
   if (strcmp(nt, musicTitle) || strcmp(na, musicArtist)) {        // lagu berganti: waktu mulai dari 0
     strcpy(musicTitle, nt); strcpy(musicArtist, na);
     musicElapsed = 0;
   }
   snprintf(musicTxt, sizeof(musicTxt), "%s%s%s", nt, (nt[0] && na[0]) ? " - " : "", na);
-  musicOn = (m.state != 0 && musicTxt[0] != 0);                   // state 0 = jeda/berhenti
+  musicOn = (playing && musicTxt[0] != 0);                        // jeda/berhenti = mati
 }
 
 // Jendela teks 21 huruf; teks yang lebih panjang bergeser satu huruf tiap 280 ms
@@ -2165,8 +2323,9 @@ void renderFace(uint32_t now, int mood, bool connected, float blink) {
 }
 
 int randomEv() {
+  if (musicOn && cfg[9] && random(0, 100) < 75) return (random(0, 100) < 60) ? EV_MUSIC : EV_DANCE;   // v22.21: lagu diputar -> wajah sering menari
   int ev = random(EV_HAPPY, EV_YAWN);
-  if (ev == lastEv) ev = (ev == EV_EAT) ? EV_HAPPY : ev + 1;
+  if (ev == lastEv && !musicOn) ev = (ev == EV_EAT) ? EV_HAPPY : ev + 1;
   return ev;
 }
 
@@ -2275,25 +2434,31 @@ void drawVisualizer(uint32_t now, float dt) {
   vizAmp = ap(vizAmp, musicOn ? 1.0f : 0.0f, 350.0f, dt);
   if (vizAmp < 0.03f) { for (int f = 0; f < 33; f++) vizLv[f] = 0; return; }
   float t = now * 0.001f;
+  bool real = audFresh();
   float kick = expf(-fmodf(t * 1.9f, 1.0f) * 6.0f);
   int rot = (int)rbwRot;
   for (int f = 0; f < 33; f++) {
     float n = (0.5f + 0.5f * sinf(t * (2.3f + 0.37f * f) + f * 1.7f)) * (0.5f + 0.5f * sinf(t * (1.1f + 0.21f * f) + f * 0.6f));
     float tgt = 0.12f + 0.6f * n * (1.0f - f / 55.0f) + kick * (f < 10 ? 0.5f : 0.12f);
+    if (real) {                                                   // v22.22: spektrum asli dari HP (band 0 = bass), diinterpolasi ke 33 batang
+      float bp = f * 15.0f / 32.0f; int b0 = (int)bp; int b1 = (b0 < 15) ? b0 + 1 : 15; float fr = bp - b0;
+      float lv = (audBands[b0] * (1.0f - fr) + audBands[b1] * fr) / 255.0f;
+      tgt = 0.04f + 0.96f * lv;
+    }
     if (tgt > 1.0f) tgt = 1.0f;
-    if (tgt > vizLv[f]) vizLv[f] = ap(vizLv[f], tgt, 45.0f, dt);
-    else vizLv[f] = max(0.0f, vizLv[f] - dt * 0.0017f);
+    if (tgt > vizLv[f]) vizLv[f] = ap(vizLv[f], tgt, real ? 25.0f : 45.0f, dt);
+    else vizLv[f] = max(real ? tgt : 0.0f, vizLv[f] - dt * (real ? 0.0028f : 0.0017f));
   }
   for (int i = 0; i < 64; i++) {
     int j = (i <= 32) ? i : 64 - i;
-    int len = (int)((3.0f + vizLv[32 - j] * 20.0f) * vizAmp);
+    int len = min(40, (int)((3.0f + vizLv[32 - j] * 20.0f) * vizAmp * cfg[4] / 100.0f));
     if (len < 2) continue;
     float a = i * 0.0981748f - 1.5708f;
     float ux = cosf(a), uy = sinf(a);
     uint16_t col = rbwCol[((i << 2) + rot) & 255];
     for (int rr = 107; rr > 107 - len; rr--) {
       float fade = 1.0f - (float)(107 - rr) / (len + 1);          // pangkal pekat, ujung memudar
-      int aCore = (int)(125 * fade) + 25, aHalo = (int)(55 * fade) + 8;
+      int aCore = min(256, ((int)(125 * fade) + 25) * cfg[5] / 100), aHalo = min(256, ((int)(55 * fade) + 8) * cfg[5] / 100);
       for (int tt = -3; tt <= 3; tt++) {
         int x = (int)(119.5f + ux * rr - uy * tt + 0.5f), y = (int)(119.5f + uy * rr + ux * tt + 0.5f);
         if ((unsigned)x >= 240 || (unsigned)y >= 240) continue;
@@ -2317,22 +2482,58 @@ void drawPhotoPlayer(uint32_t now) {
     fb->setTextColor(0x0000); fb->setCursor(tx + 1, 163); fb->print(win);
     fb->setTextColor(0xCE79); fb->setCursor(tx, 162); fb->print(win);
   }
-  uint32_t sec = musicElapsed / 1000;
-  char tb[8];
-  snprintf(tb, sizeof(tb), "%u:%02u", (unsigned)(sec / 60), (unsigned)(sec % 60));
-  int tw = strlen(tb) * 6, x0 = 120 - (tw + 6 + 76) / 2, wx = x0 + tw + 6;
-  fb->setTextColor(0x0000); fb->setCursor(x0 + 1, 175); fb->print(tb);
-  fb->setTextColor(0xFFFF); fb->setCursor(x0, 174); fb->print(tb);
+  // Progress bar bergelombang: sudah diputar = gelombang putih mengalir, sisa = garis datar abu-abu
+  uint32_t posS = musPosAt ? (uint32_t)musPosS + (now - musPosAt) / 1000UL : musicElapsed / 1000UL;
+  uint32_t durS = musDurS;
+  if (durS && posS > durS) posS = durS;
+  const int X0 = 50, X1 = 190, Y = 178;
+  float frac = durS ? (float)posS / (float)durS : 1.0f;
+  int xe = X0 + (int)((X1 - X0) * frac);
+  const uint16_t GREY = 0x8410;
+  if (xe < X1) {
+    fb->drawLine(xe, Y + 2, X1, Y + 2, 0x0000);
+    fb->drawLine(xe, Y, X1, Y, GREY);
+    fb->drawLine(xe, Y + 1, X1, Y + 1, GREY);
+  }
   float ph = now * 0.006f;
-  int px = wx, py = 0;
-  for (int k = 0; k <= 76; k += 2) {
-    int x = wx + k, y = 178 + (int)lroundf(sinf(k * 0.28f - ph) * 2.6f);
-    if (k) {
-      fb->drawLine(px, py + 1, x, y + 1, 0x0000);
+  int px = X0, py = Y;
+  for (int x = X0; x <= xe; x += 2) {
+    float amp = 2.8f * fminf(1.0f, (x - X0) / 6.0f) * fminf(1.0f, (xe - x) / 14.0f);   // pangkal & ujung menghalus ke garis lurus
+    int y = Y + (int)lroundf(sinf((x - X0) * 0.28f - ph) * amp);
+    if (x > X0) {
+      fb->drawLine(px, py + 2, x, y + 2, 0x0000);
       fb->drawLine(px, py, x, y, 0xFFFF);
-      fb->drawLine(px, py - 1, x, y - 1, 0xFFFF);
+      fb->drawLine(px, py + 1, x, y + 1, 0xFFFF);
     }
     px = x; py = y;
+  }
+  char tb[8];
+  snprintf(tb, sizeof(tb), "%u:%02u", (unsigned)(posS / 60), (unsigned)(posS % 60));
+  fb->setTextColor(0x0000); fb->setCursor(X0 + 1, 187); fb->print(tb);
+  fb->setTextColor(0xFFFF); fb->setCursor(X0, 186); fb->print(tb);
+  if (durS) {
+    snprintf(tb, sizeof(tb), "%u:%02u", (unsigned)(durS / 60), (unsigned)(durS % 60));
+    int tx = X1 - (int)strlen(tb) * 6;
+    fb->setTextColor(0x0000); fb->setCursor(tx + 1, 187); fb->print(tb);
+    fb->setTextColor(0xCE79); fb->setCursor(tx, 186); fb->print(tb);
+  }
+}
+
+// Gambar sampul album 64x64, agak transparan (cfg[0]/255) supaya wallpaper tetap terlihat; sudut membulat, muncul/hilang halus
+void drawArt(float dt) {
+  static float amp = 0;
+  amp = ap(amp, (musicOn && artOn && artBuf && cfg[1]) ? 1.0f : 0.0f, 300.0f, dt);
+  if (amp < 0.03f) return;
+  const int X0 = 88, Y0 = 30, R = 10;
+  int a = (int)(cfg[0] * amp);
+  for (int y = 0; y < ART_W; y++) {
+    int cy = (y < R) ? R - y : (y >= ART_W - R ? y - (ART_W - 1 - R) : 0);
+    uint16_t *row = fb->row(Y0 + y) + X0;
+    for (int x = 0; x < ART_W; x++) {
+      int cx = (x < R) ? R - x : (x >= ART_W - R ? x - (ART_W - 1 - R) : 0);
+      if (cx * cx + cy * cy > R * R) continue;
+      row[x] = blend565(row[x], artBuf[y * ART_W + x], a);
+    }
   }
 }
 
@@ -2371,7 +2572,7 @@ void updatePhotoStandby(bool connected) {
   fb->setTextColor(KEY);
   fb->setCursor(30, 99); fb->print(buf);
   fb->setCursor(31, 99); fb->print(buf);                           // tebalkan huruf
-  const int ALPHA = 200;                                           // 0-255: makin besar makin putih
+  const int ALPHA = cfg[2];                                        // 0-255: makin besar makin putih
   for (int y = 96; y < 146; y++) {
     uint16_t *row = fb->row(y);
     uint16_t nb = row[25];                                         // piksel asli di kiri area jam
@@ -2385,11 +2586,12 @@ void updatePhotoStandby(bool connected) {
   }
 
   pollMusic(connected);
-  drawVisualizer(now, dt);                                         // visualizer pelangi tembus pandang
-  drawPhotoPlayer(now);                                            // judul, artis, detik, garis gelombang
+  drawArt(dt);                                                     // sampul album semi-transparan
+  if (cfg[3]) drawVisualizer(now, dt);                             // visualizer pelangi tembus pandang
+  if (cfg[7]) drawPhotoPlayer(now);                                           // judul, artis, detik, garis gelombang
 
   // Cincin pelangi di tepi, warna bergeser sehingga tampak berputar
-  rbwRot += dt * 0.07f;
+  rbwRot += dt * 0.07f * cfg[6] / 100.0f;
   if (rbwRot >= 256.0f) rbwRot -= 256.0f;
   int rot = (int)rbwRot;
   for (int i = 0; i < 1024; i++) {
@@ -2443,7 +2645,7 @@ void updateFace(bool connected) {
     curEv = EV_NONE;
   } else {
     if (curEv != EV_NONE && now >= evEndMs) {
-      if (!yawned && st < SLEEP_MS - 4500 && random(0, 100) < 30) startEv(randomEv(), now);   // langsung sambung lewat kedipan
+      if (!yawned && st < SLEEP_MS - 4500 && random(0, 100) < (FACE_SLEEP ? 30 : 45)) startEv(randomEv(), now);   // langsung sambung lewat kedipan
       else { curEv = EV_NONE; forceBlink(now); }
     }
     if (!yawned && st > SLEEP_MS - 3200) {
@@ -2452,6 +2654,15 @@ void updateFace(bool connected) {
     } else if (curEv == EV_NONE && !yawned && now >= nextEvMs) {
       startEv(randomEv(), now);
     }
+  }
+
+  {                                                // v22.21: lagu baru mulai -> langsung menari (tidak menunggu jadwal acak)
+    static bool prevMusic = false;
+    pollMusic(connected);
+    if (!cfg[9]) prevMusic = true;
+    else if (musicOn && !prevMusic && mood == MOOD_HAPPY && curEv != EV_MUSIC && curEv != EV_DANCE) startEv(EV_MUSIC, now);
+    prevMusic = musicOn;
+    if (cfg[9] && musicOn && curEv == EV_NONE && nextEvMs > now + 1200) nextEvMs = now + 1200;   // jeda antar aksi dipersingkat saat lagu diputar
   }
 
   float fT = (curEv != EV_NONE) ? 1.0f : 0.0f;   // fade efek aksi masuk/keluar
@@ -2561,6 +2772,7 @@ bool     mpuOK = false, tiltInit = false;
 float    tiltRoll = 0, tiltOffset = 0, tiltMaxL = 0, tiltMaxR = 0;
 uint32_t lastTiltUs = 0, lastTiltFrame = 0;
 Preferences prefs;
+static void saveCfg() { prefs.begin("nav", false); prefs.putBytes("cfg", cfg, CFG_N); prefs.end(); }
 
 void mpuInit() {
   Wire.begin(PIN_SDA, PIN_SCL);
@@ -2629,10 +2841,22 @@ bool     fbDirty = true;
 #if TILT_UI
 uint16_t stripBuf[240 * 8];
 
+static inline uint16_t dimPx(uint16_t c) {                          // kecerahan perangkat lunak (RGB565 diskalakan dimK/256)
+  uint32_t r = ((uint32_t)(c >> 11) * dimK) >> 8, g = ((uint32_t)((c >> 5) & 63) * dimK) >> 8, b = ((uint32_t)(c & 31) * dimK) >> 8;
+  return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
 void present() {
   if (!canvasOK) return;
   presentedAngle = uiAngle;
   fbDirty = false;
+  if (fabsf(uiAngle) < 0.4f && dimK < 256) {                        // tegak + diredupkan: salin per 8 baris lewat penyangga
+    for (int y0 = 0; y0 < 240; y0 += 8) {
+      for (int r = 0; r < 8; r++) { const uint16_t *src = fb->row(y0 + r); uint16_t *o = stripBuf + r * 240; for (int x = 0; x < 240; x++) o[x] = dimPx(src[x]); }
+      panel->draw16bitRGBBitmap(0, y0, stripBuf, 240, 8);
+    }
+    return;
+  }
   if (fabsf(uiAngle) < 0.4f) {                                      // tegak: salin langsung
     for (int i = 0; i < SplitCanvas::SN; i++)
       panel->draw16bitRGBBitmap(0, i * SplitCanvas::SH, fb->s[i], 240, SplitCanvas::SH);
@@ -2653,6 +2877,7 @@ void present() {
         sx += cI; sy -= sI;
       }
     }
+    if (dimK < 256) for (int i = 0; i < 240 * 8; i++) stripBuf[i] = dimPx(stripBuf[i]);
     panel->draw16bitRGBBitmap(0, y0, stripBuf, 240, 8);
   }
 }
@@ -3023,7 +3248,6 @@ void updateGamePage(bool connected) {
 }
 
 // ---------- Animasi notifikasi ----------
-// Dipanggil dari library Chronos saat ada notifikasi baru di HP
 // Salin teks sebagai ASCII murni: emoji/karakter non-ASCII dibuang, baris baru jadi spasi, spasi ganda dirapatkan
 void asciiClean(const String &in, char *out, size_t cap) {
   size_t n = 0;
@@ -3064,12 +3288,95 @@ int wrapMsg(const char *src, char lines[3][24]) {
   return nl;
 }
 
-void onNotify(Notification n) {
-  asciiClean(n.app, notifApp, sizeof(notifApp));
-  asciiClean(n.title, notifTitle, sizeof(notifTitle));
-  asciiClean(n.message, notifMsg, sizeof(notifMsg));
-  if (!strcmp(notifTitle, notifMsg)) notifMsg[0] = 0;              // judul sama dengan isi: jangan ditampilkan dua kali
+// ---- v22.15: notifikasi dari aplikasi MotorNav ----
+// Paket kontrol: 0x20 [off u16][tot u16][data] = teks ([flags][appLen][titleLen][app][title][pesan], dipotong-potong),
+// 0x21 [off u16][data] = logo 48x48 RGB565 little-endian, 0x22 telepon masuk, 0x23 telepon selesai.
+static void blobToStr(const uint8_t *p, int len, char *out, size_t cap) {
+  String s;
+  s.reserve(len);
+  for (int i = 0; i < len; i++) s += (char)p[i];
+  asciiClean(s, out, cap);
+}
+
+void bleIconData(uint16_t off, const uint8_t *d, size_t n) {
+  if (!iconBuf) iconBuf = (uint16_t *)malloc(ICON_BYTES);
+  if (!iconBuf) return;
+  if (off == 0) iconGot = 0;
+  if (off != iconGot || (size_t)off + n > ICON_BYTES) return;     // harus berurutan
+  memcpy((uint8_t *)iconBuf + off, d, n);
+  iconGot = off + n;
+}
+
+void bleNotifText(uint16_t off, uint16_t tot, const uint8_t *d, size_t n) {
+  static uint8_t buf[320];
+  static uint16_t got = 0, want = 0;
+  if (tot < 3 || tot > sizeof(buf)) return;
+  if (off == 0) { got = 0; want = tot; }
+  if (tot != want || off != got || (size_t)off + n > tot) return;
+  memcpy(buf + off, d, n);
+  got += n;
+  if (got < want) return;
+  got = 0; want = 0;
+  int al = buf[1], tl = buf[2];
+  if (3 + al + tl > (int)tot) return;
+  blobToStr(buf + 3, al, stApp, sizeof(stApp));
+  blobToStr(buf + 3 + al, tl, stTitle, sizeof(stTitle));
+  blobToStr(buf + 3 + al + tl, tot - 3 - al - tl, stMsg, sizeof(stMsg));
+  stIcon = (buf[0] & 1) != 0;
+  stMore = (buf[0] >> 2) & 7;
+  stDrive = (buf[0] & 2) != 0;                                     // HP sedang navigasi: tampil singkat
+  stValid = true;
   notifPending = true;
+}
+
+void bleCallStart(const uint8_t *d, size_t n) {                    // [labelLen][nameLen][label][name][number]
+  int ll = d[0], nl = d[1];
+  if (n < 2 || 2 + ll + nl > (int)n) return;
+  blobToStr(d + 2, ll, callLabel, sizeof(callLabel));
+  blobToStr(d + 2 + ll, nl, callName, sizeof(callName));
+  blobToStr(d + 2 + ll + nl, n - 2 - ll - nl, callNum, sizeof(callNum));
+  callStartPending = true;
+}
+
+void bleCallEnd() { callEndPending = true; }
+
+void bleSendEvent(uint8_t code) {
+#if MAP_BLE
+  if (mapChr) { uint8_t b[2] = {0xE1, code}; mapChr->notify(b, 2); }
+#else
+  (void)code;
+#endif
+}
+
+// Pecah teks jadi baris selebar W huruf pada spasi (kata terlalu panjang dipotong). Mengembalikan jumlah baris.
+// Bila teks tidak muat di maxLines, baris terakhir diakhiri "~".
+int wrapText(const char *src, char lines[][16], int maxLines, int W) {
+  int len = strlen(src), pos = 0, nl = 0;
+  while (pos < len && nl < maxLines) {
+    while (src[pos] == ' ') pos++;
+    int rem = len - pos;
+    if (rem <= 0) break;
+    int take = rem;
+    if (rem > W) {
+      int k = W;
+      while (k >= 5 && src[pos + k] != ' ') k--;
+      take = (k >= 5) ? k : W;
+    }
+    memcpy(lines[nl], src + pos, take);
+    int e = take;
+    while (e > 0 && lines[nl][e - 1] == ' ') e--;
+    lines[nl][e] = 0;
+    pos += take;
+    nl++;
+  }
+  while (pos < len && src[pos] == ' ') pos++;
+  if (pos < len && nl > 0) {
+    int e = strlen(lines[nl - 1]);
+    if (e >= W) e = W - 1;
+    lines[nl - 1][e] = '~';
+    lines[nl - 1][e + 1] = 0;
+  }
+  return nl;
 }
 
 // Lonceng digambar di kanvas (tanpa kedip), titik pivot (120,70), bellScale untuk animasi muncul
@@ -3152,8 +3459,27 @@ void drawEnvelope(uint32_t t, float in, float out) {
 }
 
 void startNotif() {
+  if (stValid) {                                                   // dari aplikasi MotorNav
+    strlcpy(notifApp, stApp, sizeof(notifApp));
+    strlcpy(notifTitle, stTitle, sizeof(notifTitle));
+    strlcpy(notifMsg, stMsg, sizeof(notifMsg));
+    if (!strcmp(notifTitle, notifMsg)) notifMsg[0] = 0;
+    notifHasIcon = stIcon && iconBuf && iconGot >= ICON_BYTES;
+    notifDrive = stDrive;
+    notifMore = stMore;
+    stValid = false;
+  } else { notifHasIcon = false; notifDrive = false; notifMore = 0; }
+  if (notifDrive) {                                                // mode berkendara: 1 halaman saja, 4,5 dtk, bunyi pendek
+    ntNL = wrapText(notifMsg, ntLines, NT_ROWS, NT_W);
+    ntPages = 1;
+    notifDur = 4500;
+  } else {
+    ntNL = wrapText(notifMsg, ntLines, NT_LINES, NT_W);
+    ntPages = max(1, (ntNL + NT_ROWS - 1) / NT_ROWS);
+    notifDur = constrain(1800UL + ntPages * NT_PAGE_MS, 7000UL, 26000UL);   // makin panjang pesan makin lama tampil
+  }
   notifStyle = pickNotifStyle();
-  buzz(2, 70, 80);
+  if (notifDrive) buzz(1, 60, 0); else buzz(2, 70, 80);
   irisClose();
   notifActive = true;
   notifStart = millis();
@@ -3163,6 +3489,7 @@ void startNotif() {
 }
 
 void endNotif() {
+  bleSendEvent(2);                                                 // v22.20: kabar ke HP -> kirim notifikasi berikutnya dari antrean
   setDirty = true;
   notifActive = false;
   pendingFade = true;
@@ -3172,15 +3499,35 @@ void endNotif() {
   if (standby) { drawRing(1.0f, faceConnected ? COL_GREEN : COL_RED); resetStandbyFx(); }
 }
 
+static void cTextCenterAt(const char *s, int cx, int y, uint8_t size, uint16_t col) {   // teks rata tengah di x tertentu
+  int16_t x1, y1;
+  uint16_t w, h;
+  cv->setTextSize(size);
+  cv->getTextBounds(s, 0, 0, &x1, &y1, &w, &h);
+  cv->setTextColor(col);
+  cv->setCursor(cx - OX - (int)w / 2 - x1, y - OY);
+  cv->print(s);
+}
+
+// Logo aplikasi 48x48 (piksel 0x0000 = transparan), memudar bersama layar
+static void drawNotifIcon(int x0, int y0, float fade) {
+  for (int j = 0; j < ICON_W; j++)
+    for (int i = 0; i < ICON_W; i++) {
+      uint16_t c = iconBuf[j * ICON_W + i];
+      if (!c) continue;
+      if (fade < 1.0f) c = mix565(COL_BG, c, fade);
+      cv->drawPixel(x0 + i - OX, y0 + j - OY, c);
+    }
+}
+
 void updateNotif() {
   uint32_t now = millis();
   uint32_t t = now - notifStart;
-  if (t >= NOTIF_MS) { endNotif(); return; }
+  if (t >= notifDur) { endNotif(); return; }
   if (now - lastNotifFrame < FRAME_MS) return;
   lastNotifFrame = now;
 
-  // Cincin oranye berputar (diperbarui ~10x/detik agar ringan)
-  long rk = t / 100;
+  long rk = t / 100;                                                 // cincin oranye berputar (~10x/detik)
   if (rk != lastNotifRing) {
     lastNotifRing = rk;
     drawRing((t % 1000) / 1000.0f, COL_ORANGE);
@@ -3188,54 +3535,56 @@ void updateNotif() {
   if (!canvasOK) return;
 
   float in = constrain(t / 380.0f, 0.0f, 1.0f);
-  float out = constrain((NOTIF_MS - t) / 350.0f, 0.0f, 1.0f);
+  float out = constrain((notifDur - t) / 350.0f, 0.0f, 1.0f);
   float x = in - 1.0f;
-  bellScale = 1.0f + 2.70158f * x * x * x + 1.70158f * x * x;       // muncul membal (easeOutBack)
-  float decay = 1.0f - 0.6f * (float)t / NOTIF_MS;
-  float a = 0.5f * sinf(t * 0.018f) * decay * in;                    // ayunan mengecil
-  uint16_t oc = mix565(COL_BG, COL_ORANGE, out);
-  float tf = min(constrain((t - 150.0f) / 300.0f, 0.0f, 1.0f), out); // teks fade masuk/keluar
+  float sc = 1.0f + 2.70158f * x * x * x + 1.70158f * x * x;         // muncul membal (easeOutBack)
+  float tf = min(constrain((t - 120.0f) / 280.0f, 0.0f, 1.0f), out);  // teks fade masuk/keluar
+  int pg = min(ntPages - 1, (int)(t / NT_PAGE_MS));                  // halaman pesan yang tampil
+  uint32_t pt = t - (uint32_t)pg * NT_PAGE_MS;
+  float pf = 1.0f;                                                   // fade antar halaman
+  if (pg > 0) pf = constrain(pt / 220.0f, 0.0f, 1.0f);
+  if (pg < ntPages - 1) pf = min(pf, constrain((NT_PAGE_MS - pt) / 220.0f, 0.0f, 1.0f));
 
-  useClip(2);                                                        // seluruh bagian dalam cincin, cincin tidak tertimpa
+  useClip(2);
   cvClearAll();
-  for (int k = 0; k < 3; k++) {                                      // gelombang melebar dari lonceng
+  for (int k = 0; k < 3; k++) {                                      // gelombang melebar dari logo
     float ph = fmodf(t / 1500.0f + k / 3.0f, 1.0f);
-    cv->drawCircle(120 - OX, 108 - OY, 14 + (int)(ph * 46.0f),
-                   mix565(COL_BG, COL_ORANGE, (1.0f - ph) * 0.55f * out * in));
+    cv->drawCircle(120 - OX, 42 - OY, 27 + (int)(ph * 24.0f), mix565(COL_BG, COL_ORANGE, (1.0f - ph) * 0.5f * out * in));
   }
-  if (notifStyle == 1) drawChat(t, in, out);
-  else if (notifStyle == 2) drawEnvelope(t, in, out);
-  else {
-    drawBell(a, oc, mix565(COL_BG, COL_TEXT, out));
-    if ((t / 120) % 2 == 0) {                                        // garis getar kiri-kanan
-      cLine(76, 88, 64, 80, oc); cLine(74, 102, 60, 102, oc);
-      cLine(164, 88, 176, 80, oc); cLine(166, 102, 180, 102, oc);
-    }
+  cCircle(120, 42, (int)(28 * sc), mix565(COL_BG, COL_CHIP, out));  // alas bulat logo
+  if (notifHasIcon) {
+    if (in > 0.5f) drawNotifIcon(120 - ICON_W / 2, 42 - ICON_W / 2, out);
+  } else if (in > 0.5f) {                                            // tanpa logo: huruf pertama nama aplikasi
+    char lt[2] = {(char)toupper(notifApp[0] ? notifApp[0] : '!'), 0};
+    cTextCenter(lt, 30, 3, mix565(COL_BG, COL_ORANGE, out));
   }
 
-  String app = clip(String(notifApp[0] ? notifApp : "Notifikasi"), 20);      // aplikasi
-  cChipText(app, 144, 1, mix565(COL_BG, COL_ORANGE, tf), mix565(COL_BG, COL_CHIP, tf));
-  if (notifTitle[0]) cTextCenter(clip(String(notifTitle), 14).c_str(), 160, 2, mix565(COL_BG, COL_TEXT, tf));   // pengirim / judul
-  if (notifMsg[0]) {                                                         // isi pesan (maks 3 baris)
-    char ln[3][24];
-    int nl = wrapMsg(notifMsg, ln);
-    for (int i = 0; i < nl; i++) cTextCenter(ln[i], 182 + i * 11, 1, mix565(COL_BG, COL_DIM, tf));
+  if (notifMore > 0 && in > 0.5f) {                                  // lencana "+N": masih ada notifikasi menunggu
+    char bdg[4] = {'+', (char)('0' + notifMore), 0, 0};
+    cCircle(148, 24, 10, mix565(COL_BG, COL_ORANGE, tf));
+    cTextCenterAt(bdg, 148, 20, 1, mix565(COL_BG, COL_BG, 1.0f));
+  }
+  String app = clip(String(notifApp[0] ? notifApp : "Notifikasi"), 24);       // nama aplikasi
+  cChipText(app, 73, 1, mix565(COL_BG, COL_ORANGE, tf), mix565(COL_BG, COL_CHIP, tf));
+  uint16_t ct = mix565(COL_BG, COL_TEXT, tf);
+  if (strlen(notifTitle) > 16) cTextCenter(clip(String(notifTitle), 32).c_str(), 94, 1, ct);   // judul panjang: huruf kecil
+  else if (notifTitle[0]) cTextCenter(notifTitle, 90, 2, ct);                                   // pengirim / judul (besar)
+  uint16_t cb = mix565(COL_BG, COL_TEXT, min(tf, pf));
+  for (int i = 0; i < NT_ROWS; i++) {                                // isi pesan: ukuran 2, 4 baris per halaman
+    int li = pg * NT_ROWS + i;
+    if (li >= ntNL) break;
+    cTextCenter(ntLines[li], 113 + i * 20, 2, cb);
+  }
+  if (ntPages > 1) {                                                 // titik penanda halaman
+    int x0 = 120 - (ntPages - 1) * 6;
+    for (int i = 0; i < ntPages; i++)
+      cCircle(x0 + i * 12, 198, (i == pg) ? 3 : 2, mix565(COL_BG, (i == pg) ? COL_ORANGE : COL_DIM, tf));
   }
   useClip(0);
   present();
 }
 
-// ---------- Panggilan masuk ----------
-// Dipanggil dari library Chronos: incoming = true saat berdering, false saat selesai/ditolak/diangkat
-void onRinger(String caller, bool incoming) {
-  if (incoming) {
-    strlcpy(callName, caller.c_str(), sizeof(callName));
-    callStartPending = true;
-  } else {
-    callEndPending = true;
-  }
-}
-
+// ---------- Panggilan masuk (dari aplikasi MotorNav) ----------
 void startCall() {
   irisClose();
   notifActive = false;
@@ -3274,28 +3623,37 @@ void updateCall() {
   }
   if (!canvasOK) return;
 
+  if (t > 60000UL) { endCall(); return; }                          // pengaman: tak ada kabar "selesai" dari HP
   float in = constrain(t / 350.0f, 0.0f, 1.0f);
   float x = in - 1.0f;
   float sc = 1.0f + 2.70158f * x * x * x + 1.70158f * x * x;
+  const int CY = 64;                                               // pusat ikon telepon (naik agar nama muat besar)
   useClip(2);
   cvClearAll();
   for (int k = 0; k < 3; k++) {                                    // gelombang hijau melebar
     float ph = fmodf(t / 1500.0f + k / 3.0f, 1.0f);
-    cv->drawCircle(120 - OX, 96 - OY, 40 + (int)(ph * 30.0f), mix565(COL_BG, COL_GREEN, (1.0f - ph) * 0.6f));
+    cv->drawCircle(120 - OX, CY - OY, 34 + (int)(ph * 20.0f), mix565(COL_BG, COL_GREEN, (1.0f - ph) * 0.6f));
   }
-  cCircle(120, 96, (int)(38 * sc), mix565(COL_BG, COL_GREEN, 0.35f));
+  cCircle(120, CY, (int)(32 * sc), mix565(COL_BG, COL_GREEN, 0.35f));
   float sh = ((t % 1500) < 800) ? sinf(t * 0.05f) * 14.0f : 0.0f;  // gagang bergetar lalu jeda
   float a0 = 25.0f + sh, a1 = 155.0f + sh;
-  cArc(120, 86, 31, 23, a0, a1, COL_TEXT);                         // gagang telepon
-  float r = 27.0f * 3.1416f / 180.0f;
-  cCircle(120 + (int)(cosf(a0 * 0.017453f) * 27.0f), 86 + (int)(sinf(a0 * 0.017453f) * 27.0f) - 2, (int)(9 * sc), COL_TEXT);
-  cCircle(120 + (int)(cosf(a1 * 0.017453f) * 27.0f), 86 + (int)(sinf(a1 * 0.017453f) * 27.0f) - 2, (int)(9 * sc), COL_TEXT);
-  (void)r;
+  cArc(120, CY - 8, 27, 20, a0, a1, COL_TEXT);                     // gagang telepon
+  cCircle(120 + (int)(cosf(a0 * 0.017453f) * 23.0f), CY - 8 + (int)(sinf(a0 * 0.017453f) * 23.0f) - 2, (int)(8 * sc), COL_TEXT);
+  cCircle(120 + (int)(cosf(a1 * 0.017453f) * 23.0f), CY - 8 + (int)(sinf(a1 * 0.017453f) * 23.0f) - 2, (int)(8 * sc), COL_TEXT);
 
   float tf = constrain((t - 200.0f) / 300.0f, 0.0f, 1.0f);
-  cTextCenter("Panggilan masuk", 148, 1, mix565(COL_BG, COL_DIM, tf));
-  String nm = clip(String(callName[0] ? callName : "Tak dikenal"), 12);
-  cChipText(nm, 164, 2, mix565(COL_BG, COL_TEXT, tf), mix565(COL_BG, COL_CHIP, tf));
+  uint16_t cTx = mix565(COL_BG, COL_TEXT, tf), cDm = mix565(COL_BG, COL_DIM, tf);
+  cTextCenter(callLabel[0] ? callLabel : "Panggilan masuk", 112, 1, mix565(COL_BG, COL_GREEN, tf));
+  const char *nm = callName[0] ? callName : (callNum[0] ? callNum : "Tak dikenal");
+  char cl[2][16];
+  int n = wrapText(nm, cl, 2, NT_W);                               // nama besar, maks 2 baris
+  for (int i = 0; i < n; i++) cTextCenter(cl[i], 128 + i * 20, 2, cTx);
+  if (callNum[0] && strcmp(callNum, nm)) {                         // nomor di bawah nama
+    int ny = 128 + n * 20 + 6;
+    if (strlen(callNum) <= (size_t)NT_W) cTextCenter(callNum, ny, 2, cDm);
+    else cTextCenter(callNum, ny + 4, 1, cDm);
+  }
+  cTextCenter("sentuh=tutup  tahan=tolak", 202, 1, mix565(COL_BG, COL_DIM, tf * 0.7f));
   useClip(0);
   present();
 }
@@ -3381,223 +3739,52 @@ void wpInfo(char *out, size_t cap) {                               // keterangan
   else strlcpy(out, "ISI: KOSONG (FOTO BAWAAN)", cap);
 }
 
-static const char UPLOAD_PAGE[] PROGMEM = R"rawliteral(<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Foto/Video Standby</title>
-<style>body{font-family:sans-serif;background:#111;color:#eee;text-align:center;padding:16px}canvas{width:240px;height:240px;border-radius:50%;background:#000;margin:12px auto;display:block}button,input{font-size:16px;margin:6px}button{padding:10px 18px;border:0;border-radius:8px;background:#2a8;color:#fff}#r{background:#a33}button:disabled{opacity:.4}</style></head><body>
-<h2>Foto / Video Standby</h2>
-<input type=file id=f accept="image/*,video/*"><br>
-<canvas id=c width=240 height=240></canvas>
-Gelapkan tengah: <input type=range id=d min=0 max=60 value=35 oninput=draw()><br>
-FPS video: <select id=fp><option value=0>Otomatis (maks 15)</option><option value=10>10 fps (paling panjang)</option><option value=15>15 fps</option><option value=20>20 fps</option><option value=30>30 fps (paling halus, paling pendek)</option></select><br>
-<button id=go onclick=go()>Kirim ke layar</button><button id=r onclick=rs()>Kosongkan</button>
-<p id=sl></p>
-<p style="font-size:13px;color:#aaa">Satu slot untuk foto ATAU video. Foto besar otomatis diperkecil. Video panjang diatur otomatis (fps &amp; kualitas) agar muat, atau pilih fps sendiri (makin tinggi, makin pendek durasi yang muat); proses di HP bisa beberapa menit, jangan tutup halaman.</p>
-<p id=m></p>
-<script>
-var CAP=0,img=null,vel=document.createElement('video'),isV=false,vready=false,c=document.getElementById('c'),x=c.getContext('2d');
-x.imageSmoothingQuality='high';vel.muted=true;vel.playsInline=true;vel.preload='auto';
-function m(t){document.getElementById('m').textContent=t}
-function shade(){var k=document.getElementById('d').value/100,g=x.createRadialGradient(120,120,0,120,120,110);g.addColorStop(0,'rgba(0,0,0,'+k+')');g.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=g;x.fillRect(0,0,240,240)}
-function sq(src,w,h){var s=Math.min(w,h);x.drawImage(src,(w-s)/2,(h-s)/2,s,s,0,0,240,240)}
-function draw(){if(isV){if(!vready)return;sq(vel,vel.videoWidth,vel.videoHeight)}else{if(!img)return;sq(img,img.naturalWidth,img.naturalHeight)}shade()}
-function seek(t){return new Promise(function(r){var d=false,f=function(){if(!d){d=true;r()}};vel.onseeked=f;setTimeout(f,4000);if(Math.abs(vel.currentTime-t)<0.0005)setTimeout(f,60);vel.currentTime=t})}
-document.getElementById('f').onchange=function(e){
-var f=e.target.files[0];if(!f)return;img=null;vready=false;isV=f.type.indexOf('video')==0;m('');
-if(isV){vel.onloadeddata=function(){seek(Math.min(0.1,vel.duration/2)).then(function(){vready=true;draw();m('Video '+vel.duration.toFixed(1)+' dtk, '+Math.round(f.size/1048576)+' MB')})};vel.onerror=function(){m('Video tidak bisa dibaca di browser ini')};vel.src=URL.createObjectURL(f);vel.load()}
-else{var i=new Image();i.onload=function(){img=i;draw();m('Foto '+i.naturalWidth+'x'+i.naturalHeight+' (akan diperkecil)')};i.onerror=function(){m('Foto tidak bisa dibaca')};i.src=URL.createObjectURL(f)}};
-function go(){if(isV){if(!vready){m('Pilih video dulu');return}upv()}else{if(!img){m('Pilih foto/video dulu');return}up()}}
-function up(){draw();var d=x.getImageData(0,0,240,240).data,b=new Uint8Array(115200);
-for(var i=0,j=0;i<57600;i++,j+=2){var px=i%240,py=(i/240)|0,r=d[i*4],g=d[i*4+1],bl=d[i*4+2];if(Math.hypot(px-119.5,py-119.5)>121){r=g=bl=0}
-var v=((r&248)<<8)|((g&252)<<3)|(bl>>3);b[j]=v&255;b[j+1]=v>>8}
-var fd=new FormData();fd.append('p',new Blob([b]),'p.bin');m('Mengirim...');
-fetch('/up',{method:'POST',body:fd}).then(function(r){return r.text()}).then(m).catch(function(e){m('Gagal: '+e)})}
-function rs(){fetch('/reset').then(function(r){return r.text()}).then(m)}
-function enc(q){return new Promise(function(r){c.toBlob(r,'image/jpeg',q)})}
-function pad(n){return (n+3)&~3}
-async function upv(){
-var FPSMAX=15,FPSMIN=6,MAXF=900,HDR=8192,BUDGET=Math.floor(((CAP||2424832)-HDR-8192)*0.97),dur=vel.duration,btn=document.getElementById('go');
-if(!isFinite(dur)||dur<=0){m('Durasi video tidak terbaca');return}
-btn.disabled=true;
-async function grab(t){await seek(Math.min(t,dur-0.02));draw()}
-m('Menghitung ukuran...');
-var S=0,ns=6;
-for(var j=0;j<ns;j++){await grab(dur*(j+0.5)/ns);var sb=await enc(0.5);S+=pad(sb.size)}
-S/=ns;
-var nAff=Math.max(1,Math.floor(BUDGET/(S*1.05)));
-var fx=parseInt(document.getElementById('fp').value)||0;
-var fps=fx?fx:Math.max(FPSMIN,Math.min(FPSMAX,Math.floor(nAff/dur)));
-var n=Math.max(1,Math.min(Math.floor(dur*fps),nAff,MAXF));
-var q=0.5,blobs=[],total=0,cut=n<Math.floor(dur*fps);
-for(var i=0;i<n;i++){
-m('Frame '+(i+1)+'/'+n+' ('+fps+' fps, '+Math.round(total/1024)+' KB dari '+Math.round(BUDGET/1024)+' KB)'+(cut?' - video dipotong dari awal':''));
-await grab((i+0.5)/fps);
-var b=await enc(q),sz=pad(b.size),per=(BUDGET-total)/(n-i);
-blobs.push(b);total+=sz;
-if(sz>per)q=Math.max(0.2,q-(sz>per*1.25?0.08:0.04));else if(sz<per*0.8)q=Math.min(0.85,q+0.02);}
-while(total>BUDGET&&blobs.length>1){total-=pad(blobs.pop().size)}
-n=blobs.length;
-var hd=new Uint8Array(HDR),dv=new DataView(hd.buffer);
-for(var i=0;i<8;i++)hd[i]='MNVIDEO2'.charCodeAt(i);
-dv.setUint16(8,n,true);dv.setUint16(10,fps,true);dv.setUint32(12,total,true);
-var off=0,parts=[hd];
-for(var i=0;i<n;i++){
-var sz=blobs[i].size;
-dv.setUint32(16+i*8,off,true);dv.setUint32(20+i*8,sz,true);
-parts.push(blobs[i]);
-var p=pad(sz)-sz;
-if(p)parts.push(new Uint8Array(p).fill(255));
-off+=sz+p;}
-var fd=new FormData();fd.append('v',new Blob(parts),'v.bin');
-m('Mengirim '+n+' frame ('+fps+' fps, '+(n/fps).toFixed(1)+' dtk, '+Math.round(total/1024)+' KB), jangan tutup halaman...');
-fetch('/upv',{method:'POST',body:fd}).then(function(r){return r.text()}).then(function(t){m(t);btn.disabled=false}).catch(function(e){m('Gagal: '+e);btn.disabled=false})}
-fetch('/info').then(function(r){return r.text()}).then(function(t){CAP=parseInt(t)||0;document.getElementById('sl').textContent='Kapasitas: '+(CAP/1048576).toFixed(1)+' MB (1 slot foto/video)'});
-</script></body></html>)rawliteral";
-
-WebServer *web = nullptr;
-#define UPBUF_SZ 4096
-static uint8_t *upBuf = nullptr;                                   // dialokasi hanya di mode upload (hemat RAM)
-static uint32_t upFill = 0, upOff = 16;
-static bool     upBad = false, upOk = false;
-static uint32_t upDoneAt = 0;
-
-static void upFlush(bool last) {                                   // tulis per blok 4 KB (selalu rata 4 byte)
-  if (!upFill) return;
-  uint32_t n = upFill;
-  if (last) { while (n & 3) upBuf[n++] = 0xFF; }
-  if (!upBad && esp_partition_write(photoPart(), upOff, upBuf, n) != ESP_OK) upBad = true;
-  upOff += upFill; upFill = 0;
+// ---------- v22.25: animasi boot (video "MNVIDEO2" di partisi data kedua "bootanim") ----------
+const esp_partition_t *bootPart() {
+  const esp_partition_t *p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "bootanim");
+  return (p && p->size >= 65536) ? p : nullptr;
 }
 
-static void upHandle() {
-  HTTPUpload &u = web->upload();
-  if (u.status == UPLOAD_FILE_START) {
-    upFill = 0; upOff = 16; upBad = false; upOk = false;
-    if (PHOTO_ERASE > photoPart()->size || esp_partition_erase_range(photoPart(), 0, PHOTO_ERASE) != ESP_OK) upBad = true;
-  } else if (u.status == UPLOAD_FILE_WRITE) {
-    for (size_t i = 0; i < u.currentSize; i++) {
-      upBuf[upFill++] = u.buf[i];
-      if (upFill == UPBUF_SZ) upFlush(false);
-    }
-  } else if (u.status == UPLOAD_FILE_END) {
-    upFlush(true);
-    if (!upBad && upOff - 16 >= 240 * 240 * 2 && upOff - 16 < 240 * 240 * 2 + 4) {
-      uint8_t hd[16]; memcpy(hd, PHOTO_MAGIC, 8); memset(hd + 8, 0xFF, 8);
-      upOk = esp_partition_write(photoPart(), 0, hd, 16) == ESP_OK;
-    }
+#if TILT_UI && HAVE_ROM_JPEG
+void bootAnimPlay() {                                              // dipanggil sekali di setup(); slot kosong/rusak = langsung kembali
+  if (!canvasOK || !fb || !jdPool) return;
+  const esp_partition_t *p = bootPart();
+  if (!p) return;
+  uint8_t h[16];
+  if (esp_partition_read(p, 0, h, 16) != ESP_OK || memcmp(h, "MNVIDEO2", 8) != 0) return;
+  uint16_t n = h[8] | (h[9] << 8), fps = h[10] | (h[11] << 8);
+  uint32_t total = h[12] | (h[13] << 8) | (h[14] << 16) | ((uint32_t)h[15] << 24);
+  if (n < 1 || n > VID_MAXF || fps < 1 || fps > 30 || total == 0 || VID_HDR2 + total > p->size) return;
+  const void *ptr = nullptr;
+  PhotoMapH mh;
+  if (esp_partition_mmap(p, 0, VID_HDR2 + total, ESP_PARTITION_MMAP_DATA, &ptr, &mh) != ESP_OK) { Serial.println("Boot: mmap gagal"); return; }
+  const uint32_t *tab = (const uint32_t *)((const uint8_t *)ptr + 16);
+  const uint8_t *base = (const uint8_t *)ptr + VID_HDR2;
+  for (int i = 0; i < n; i++) {
+    uint32_t off = tab[i * 2], len = tab[i * 2 + 1];
+    if (len == 0 || len > 65535 || off + len > total) { WP_UNMAP(mh); Serial.println("Boot: tabel frame rusak"); return; }
   }
-}
-
-static uint32_t upOffV = 0;
-static uint8_t  upMagic[8];
-
-static void upFlushV(bool last) {                                  // tulis per blok 4 KB; tiap sektor dihapus tepat sebelum ditulis
-  if (!upFill) return;
-  uint32_t n = upFill;
-  if (last) { while (n & 3) upBuf[n++] = 0xFF; }
-  const esp_partition_t *p = photoPart();
-  if (!upBad) {
-    if (upOffV == 0) { memcpy(upMagic, upBuf, 8); memset(upBuf, 0xFF, 8); }   // tanda sah ditulis paling akhir
-    if (upOffV + n > p->size) upBad = true;
-    else {
-      if ((upOffV & 4095) == 0 && esp_partition_erase_range(p, upOffV, 4096) != ESP_OK) upBad = true;
-      if (!upBad && esp_partition_write(p, upOffV, upBuf, n) != ESP_OK) upBad = true;
-    }
-  }
-  upOffV += upFill; upFill = 0;
-}
-
-static void upHandleV() {
-  HTTPUpload &u = web->upload();
-  if (u.status == UPLOAD_FILE_START) {
-    upFill = 0; upOffV = 0; upBad = false; upOk = false;
-    const esp_partition_t *p = photoPart();
-    if (esp_partition_erase_range(p, 0, 4096) != ESP_OK) upBad = true;
-  } else if (u.status == UPLOAD_FILE_WRITE) {
-    for (size_t i = 0; i < u.currentSize; i++) {
-      upBuf[upFill++] = u.buf[i];
-      if (upFill == UPBUF_SZ) upFlushV(false);
-    }
-  } else if (u.status == UPLOAD_FILE_END) {
-    upFlushV(true);
-    if (!upBad && upOffV >= VID_HDR2 + 4) upOk = esp_partition_write(photoPart(), 0, upMagic, 8) == ESP_OK;
-  }
-}
-
-static void uplText(int y, const char *t, uint8_t sz, uint16_t col) {
-  panel->setTextSize(sz);
-  panel->setTextColor(col);
-  int16_t x1, y1; uint16_t w, h;
-  panel->getTextBounds(t, 0, 0, &x1, &y1, &w, &h);
-  panel->setCursor(120 - (int)w / 2 - x1, y);
-  panel->print(t);
-}
-
-bool bootPressed();
-
-[[noreturn]] void runUploadMode() {
-  panel->begin(SPI_HZ);
-  panel->fillScreen(0x0000);
-  upBuf = (uint8_t *)malloc(UPBUF_SZ);
-  if (!upBuf) ESP.restart();
-  uplText(52, "UPLOAD MEDIA", 2, 0xFFFF);
-  if (!photoPart()) {
-    uplText(100, "Partisi spiffs", 2, 0xF800);
-    uplText(122, "tidak ada!", 2, 0xF800);
-    uplText(160, "Pilih Partition Scheme", 1, 0xFFFF);
-    uplText(172, "Default 4MB with spiffs", 1, 0xFFFF);
-    delay(6000);
-    ESP.restart();
-  }
-  uplText(70, "Foto atau video (1 slot)", 1, 0xFFE0);
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP("MotorNav-Foto", "12345678");
-  uplText(88, "WiFi:", 1, 0x07E0);
-  uplText(100, "MotorNav-Foto", 2, 0xFFFF);
-  uplText(124, "Sandi: 12345678", 1, 0x07E0);
-  uplText(146, "Buka browser:", 1, 0x07E0);
-  uplText(158, "192.168.4.1", 2, 0xFFE0);
-  uplText(186, "Sentuh = batal", 1, 0x7BEF);
-
-  web = new WebServer(80);
-  web->on("/", HTTP_GET, []() { web->send_P(200, "text/html", UPLOAD_PAGE); });
-  web->on("/up", HTTP_POST, []() {
-    web->send(200, "text/plain", upOk ? "Berhasil! Layar restart sebentar..." : "Gagal menyimpan, coba lagi");
-    if (upOk) upDoneAt = millis();
-  }, upHandle);
-  web->on("/reset", HTTP_GET, []() {
-    esp_partition_erase_range(photoPart(), 0, 4096);
-    web->send(200, "text/plain", "Slot dikosongkan (kembali ke foto bawaan). Restart...");
-    upDoneAt = millis();
-  });
-  web->on("/upv", HTTP_POST, []() {
-    web->send(200, "text/plain", upOk ? "Video tersimpan! Layar restart sebentar..." : "Gagal menyimpan video (sudah flash dengan partitions.csv?)");
-    if (upOk) upDoneAt = millis();
-  }, upHandleV);
-  web->on("/info", HTTP_GET, []() {                                // kapasitas slot (byte) untuk browser
-    char b[16]; snprintf(b, sizeof(b), "%u", (unsigned)photoPart()->size);
-    web->send(200, "text/plain", b);
-  });
-  web->begin();
-
-  while (digitalRead(PIN_TOUCH) || bootPressed()) delay(10);       // tunggu jari dilepas dulu
-  uint32_t t0 = millis();
+  uiAngle = 0;                                                     // animasi selalu tegak
+  const uint32_t durMs = (uint32_t)n * 1000UL / fps;
+  const uint32_t t0 = millis();
+  int last = -1;
   while (true) {
-    web->handleClient();
-    if (upDoneAt && millis() - upDoneAt > 1500) { panel->fillScreen(0x0000); uplText(110, "SELESAI", 2, 0x07E0); delay(800); ESP.restart(); }
-    if (digitalRead(PIN_TOUCH) || bootPressed() || millis() - t0 > 900000UL) ESP.restart();   // sentuh = batal, 5 menit tanpa aksi = keluar
-    delay(2);
+    uint32_t el = millis() - t0;
+    if (el >= durMs) break;
+    int i = (int)((uint64_t)el * fps / 1000);                      // pacu waktu: bila decode lambat, frame dilewati (durasi tetap)
+    if (i >= n) i = n - 1;
+    if (i != last) {
+      last = i;
+      if (mapDecode(base + tab[i * 2], tab[i * 2 + 1])) present();
+    } else delay(1);
+    if (el > 400 && digitalRead(PIN_TOUCH)) break;                 // sentuh = lewati
   }
+  WP_UNMAP(mh);
+  Serial.printf("Boot: animasi %u frame @ %u fps selesai\n", n, fps);
 }
-
-// tahan sensor sentuh ~2 detik saat dinyalakan -> mode upload foto
-bool uploadRequested() {
-  if (!digitalRead(PIN_TOUCH)) return false;
-  uint32_t t0 = millis();
-  while (millis() - t0 < 2000) {
-    if (!digitalRead(PIN_TOUCH)) return false;
-    delay(10);
-  }
-  return true;
-}
+#else
+void bootAnimPlay() {}
+#endif
 
 // ---------- Utama ----------
 bool bootPressed() {                                               // tombol BOOT (ESP32 biasa) = sentuhan tambahan
@@ -3610,7 +3797,7 @@ bool bootPressed() {                                               // tombol BOO
 
 // ---------- Menu pengaturan (tahan sensor 4 dtk di standby) ----------
 #define SET_N 5
-const char *SET_NAME[SET_N] = {"MULAI UPLOAD", "TAMPILAN NAV", "TEMA", "STANDBY", "KELUAR"};
+const char *SET_NAME[SET_N] = {"WALLPAPER", "TAMPILAN NAV", "TEMA", "STANDBY", "KELUAR"};
 
 void saveU8(const char *k, uint8_t v) {
   prefs.begin("nav", false);
@@ -3625,7 +3812,7 @@ void drawSettings() {
   drawCentered(SET_NAME[setIdx], 76, 2, COL_ORANGE);
   char v[24] = "", info[32] = "";
   switch (setIdx) {
-    case 0: strlcpy(v, "TAHAN", sizeof(v)); wpInfo(info, sizeof(info)); break;
+    case 0: strlcpy(v, "APLIKASI", sizeof(v)); wpInfo(info, sizeof(info)); break;
     case 1:
       strlcpy(v, navStyle == 1 ? "3D" : (navStyle == 2 ? "LIVE" : "PETA"), sizeof(v));
       strlcpy(info, navStyle == 2 ? "PETA ASLI DARI HP (BLE)" : "TAHAN: UBAH TAMPILAN", sizeof(info));
@@ -3661,10 +3848,7 @@ void settingsLeave() {
 
 void settingsAction() {                                            // dipanggil saat item menu ditahan
   switch (setIdx) {
-    case 0:
-      saveU8("upl", 1);
-      delay(300);
-      ESP.restart();                                               // masuk mode upload foto/video
+    case 0:                                                        // wallpaper diunggah dari aplikasi MotorNav (Bluetooth)
       break;
     case 1:
       navStyle = (navStyle + 1) % (MAP_BLE ? 3 : 2);
@@ -3687,14 +3871,20 @@ void settingsAction() {                                            // dipanggil 
 }
 
 #if MAP_BLE
-// ---------- v22.13: upload wallpaper (foto 240x240 RGB565) lewat BLE ----------
-// Status (dibaca aplikasi): 0 diam, 1 menghapus, 2 siap, 3 menerima, 4 sukses, 5 gagal.
+// ---------- v22.14: upload wallpaper (FOTO atau VIDEO) lewat BLE ----------
+// Yang dikirim = citra lengkap isi partisi, mulai offset 0 (foto: header 16 byte "MNPHOTO1" + 115200 byte RGB565;
+// video: header "MNVIDEO2" + tabel + frame JPEG). Delapan byte pertama (tanda sah) ditulis paling akhir, setelah CRC cocok.
+// Status (dibaca aplikasi): 0 diam, 1 bersiap, 2 siap, 3 menerima, 4 sukses, 5 gagal.
 static volatile uint8_t wpUp = 0;
-static volatile bool wpUpReq = false, wpUpErasing = false, wpUpReload = false;
-static uint32_t wpUpExp = 0, wpUpFlushed = 0, wpUpEr = 0, wpUpCrc = 0;
+static volatile uint8_t wpUpTgt = 0;                               // v22.25: 0 = wallpaper, 1 = animasi boot
+const esp_partition_t *photoPart();
+const esp_partition_t *bootPart();
+static const esp_partition_t *upPart() { return wpUpTgt ? bootPart() : photoPart(); }
+static volatile bool wpUpReq = false, wpUpReload = false, wpUpClear = false;
+static uint32_t wpUpSize = 0, wpUpExp = 0, wpUpFlushed = 0, wpUpCrc = 0;
 static uint16_t wpUpFill = 0;
+static uint8_t wpUpMagic[8];
 static volatile uint32_t wpUpLast = 0;                              // aktivitas terakhir (batas waktu 10 dtk)
-#define WPU_BYTES (240 * 240 * 2)
 
 static void wpUpSet(uint8_t st) {
   wpUp = st;
@@ -3708,18 +3898,31 @@ static uint32_t wpCrc(uint32_t c, const uint8_t *p, size_t n) {    // CRC-32 sta
 
 bool bleWpBusy() { return wpUp >= 1 && wpUp <= 3; }
 
-void bleWpBegin(uint32_t size) {                                   // dipanggil dari tugas BLE
-  if (size != WPU_BYTES || !photoPart() || !mapBuf[0]) { wpUpSet(5); return; }
-  wpUpExp = 0; wpUpFlushed = 0; wpUpFill = 0; wpUpCrc = 0xFFFFFFFFu;
+void bleWpBegin(uint32_t size, uint8_t tgt) {                      // dipanggil dari tugas BLE
+  wpUpTgt = tgt ? 1 : 0;
+  const esp_partition_t *p = upPart();
+  if (!p || !mapBuf[0] || size < 64 || (size & 3) || size > p->size) { wpUpSet(5); return; }
+  wpUpSize = size; wpUpExp = 0; wpUpFlushed = 0; wpUpFill = 0; wpUpCrc = 0xFFFFFFFFu;
   mapFid = 255; mapGot = 0; mapTot = 0;
   wpUpLast = millis();
   wpUpSet(1);
-  wpUpReq = true;                                                  // penghapusan dikerjakan di loop() agar tugas BLE tidak tertahan
+  wpUpReq = true;                                                  // pelepasan peta & hapus sektor awal dikerjakan di loop()
 }
 
-static bool wpUpFlush() {                                          // tulis penyangga (mapBuf[0]) ke flash, mulai offset 16
+void bleWpClear(uint8_t tgt) {                                     // kosongkan slot (wallpaper -> foto bawaan, boot -> tanpa animasi)
+  if (bleWpBusy()) return;
+  wpUpTgt = tgt ? 1 : 0;
+  wpUpLast = millis();
+  wpUpSet(1);
+  wpUpClear = true;
+}
+
+static bool wpUpFlush() {                                          // tulis penyangga (mapBuf[0]) ke flash; sektor dihapus tepat sebelum ditulis
   if (!wpUpFill) return true;
-  if (esp_partition_write(photoPart(), 16 + wpUpFlushed, mapBuf[0], wpUpFill) != ESP_OK) return false;
+  const esp_partition_t *p = upPart();
+  if (wpUpFlushed == 0) { memcpy(wpUpMagic, mapBuf[0], 8); memset(mapBuf[0], 0xFF, 8); }   // sektor 0 sudah dihapus saat mulai
+  else if (esp_partition_erase_range(p, wpUpFlushed, 4096) != ESP_OK) return false;
+  if (esp_partition_write(p, wpUpFlushed, mapBuf[0], wpUpFill) != ESP_OK) return false;
   wpUpFlushed += wpUpFill; wpUpFill = 0;
   return true;
 }
@@ -3728,7 +3931,7 @@ void bleWpData(uint32_t off, const uint8_t *d, size_t n) {
   if (wpUp != 2 && wpUp != 3) return;
   wpUpLast = millis();
   if (off < wpUpExp) return;                                       // paket ganda (kirim ulang): abaikan
-  if (off != wpUpExp || off + n > WPU_BYTES) { wpUpSet(5); return; }
+  if (off != wpUpExp || off + n > wpUpSize) { wpUpSet(5); return; }
   wpUpCrc = wpCrc(wpUpCrc, d, n);
   size_t i = 0;
   while (i < n) {
@@ -3742,25 +3945,26 @@ void bleWpData(uint32_t off, const uint8_t *d, size_t n) {
 }
 
 void bleWpEnd(uint32_t crc) {
-  if (wpUp != 3 || wpUpExp != WPU_BYTES || !wpUpFlush() || (~wpUpCrc) != crc) { wpUpSet(5); return; }
-  uint8_t hd[16]; memcpy(hd, PHOTO_MAGIC, 8); memset(hd + 8, 0xFF, 8);   // tanda sah ditulis paling akhir
-  if (esp_partition_write(photoPart(), 0, hd, 16) != ESP_OK) { wpUpSet(5); return; }
-  wpUpReload = true;                                               // petakan ulang di loop()
+  if (wpUp != 3 || wpUpExp != wpUpSize || !wpUpFlush() || (~wpUpCrc) != crc) { wpUpSet(5); return; }
+  if (esp_partition_write(upPart(), 0, wpUpMagic, 8) != ESP_OK) { wpUpSet(5); return; }   // tanda sah paling akhir
+  wpUpReload = (wpUpTgt == 0);                                               // petakan ulang di loop()
   wpUpSet(4);
 }
 
 void bleWpTick() {                                                 // dipanggil dari loop()
-  if (bleWpBusy() && !wpUpErasing && !wpUpReq && millis() - wpUpLast > 10000) wpUpSet(5);   // HP hilang di tengah upload: lepas kunci frame peta
-  if (wpUpReq) {
-    wpUpReq = false;
-    if (wpMapped) { WP_UNMAP(wpH); wpMapped = false; }            // lepas pemetaan flash sebelum dihapus
-    photoPtr = STANDBY_PHOTO; vidOK = false;
-    wpUpEr = 0; wpUpErasing = true;
-  }
-  if (wpUpErasing) {
-    if (esp_partition_erase_range(photoPart(), wpUpEr, 4096) != ESP_OK) { wpUpErasing = false; wpUpSet(5); return; }
-    wpUpEr += 4096;
-    if (wpUpEr >= PHOTO_ERASE) { wpUpErasing = false; wpUpLast = millis(); wpUpSet(2); }
+  if (bleWpBusy() && !wpUpReq && !wpUpClear && millis() - wpUpLast > 10000) wpUpSet(5);   // HP hilang di tengah upload: lepas kunci frame peta
+  if (wpUpReq || wpUpClear) {
+    bool clr = wpUpClear;
+    wpUpReq = false; wpUpClear = false;
+    if (wpUpTgt == 0) {
+      if (wpMapped) { WP_UNMAP(wpH); wpMapped = false; }          // lepas pemetaan flash sebelum dihapus
+      photoPtr = STANDBY_PHOTO; vidOK = false;
+    }
+    const esp_partition_t *up = upPart();
+    if (!up || esp_partition_erase_range(up, 0, 4096) != ESP_OK) { wpUpSet(5); return; }   // tanda sah lama hilang
+    wpUpLast = millis();
+    if (clr) { if (wpUpTgt == 0) wallpaperLoad(); wpUpSet(4); }
+    else wpUpSet(2);
   }
   if (wpUpReload) { wpUpReload = false; wallpaperLoad(); Serial.println("Wallpaper dari BLE tersimpan"); }
 }
@@ -3772,11 +3976,6 @@ void setup() {
 #if PIN_BOOT >= 0
   pinMode(PIN_BOOT, INPUT_PULLUP);
 #endif
-  prefs.begin("nav", false);                                       // permintaan mode upload dari standby (tahan 4 dtk)
-  bool uplFlag = prefs.getUChar("upl", 0) != 0;
-  if (uplFlag) prefs.putUChar("upl", 0);
-  prefs.end();
-  if (uplFlag || uploadRequested()) runUploadMode();
   prefs.begin("nav", true);
   lightTheme = prefs.getUChar("light", 0) != 0;
   navStyle = prefs.getUChar("navst", 0);
@@ -3797,18 +3996,12 @@ void setup() {
 #ifdef ARDUINO_ARCH_ESP32
   Serial.printf("Kanvas %s | heap bebas %u | blok terbesar %u\n", canvasOK ? "OK" : "GAGAL", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 #endif
-  {                                                                // layar diagnostik 2 detik saat boot (untuk foto)
+  if (!canvasOK) {                                                 // v22.25: layar "KANVAS OK" dihapus; hanya peringatan bila gagal
     panel->fillScreen(0x0000);
     panel->setTextSize(2);
-    panel->setTextColor(canvasOK ? 0x07E0 : 0xF800);
-    panel->setCursor(50, 70);  panel->print(canvasOK ? "KANVAS OK" : "KANVAS GAGAL");
-    panel->setTextSize(1);
-    panel->setTextColor(0xFFFF);
-    panel->setCursor(50, 105); panel->printf("heap bebas : %u", (unsigned)ESP.getFreeHeap());
-    panel->setCursor(50, 120); panel->printf("blok besar : %u", (unsigned)ESP.getMaxAllocHeap());
-    panel->setCursor(50, 135); panel->printf("video %s", vidOK ? "ya" : "tidak");
-    panel->setCursor(50, 150); panel->printf("tema %s  slot %u KB", lightTheme ? "terang" : "gelap", (unsigned)wpCapKB());
-    delay(2000);
+    panel->setTextColor(0xF800);
+    panel->setCursor(40, 110); panel->print("KANVAS GAGAL");
+    delay(1500);
   }
 #else
   cv = new Arduino_Canvas(CVW, CVH, (Arduino_G *)panel, CVX, CVY);
@@ -3822,34 +4015,60 @@ void setup() {
   lastActivity = millis();
   prefs.begin("nav", true);
   standbyMode = prefs.getUChar("sbmode", 0) ? 1 : 0;               // mode standby terakhir
+  { uint8_t t[CFG_N]; size_t n = prefs.getBytesLength("cfg"); if (n == CFG_N && prefs.getBytes("cfg", t, CFG_N) == CFG_N) { memcpy(cfg, t, CFG_N); cfgClamp(); } }
   prefs.end();
+  bootAnimPlay();                                                  // v22.25: animasi boot dari aplikasi (kecerahan sudah terbaca dari cfg)
+  gfx->fillScreen(COL_BG);
+  syncFB();
 #if MAP_BLE
   mapBuf[0] = (uint8_t *)malloc(MAP_BUF_SZ);
   mapBuf[1] = (uint8_t *)malloc(MAP_BUF_SZ);
   if (!jdPool) jdPool = (uint8_t *)malloc(JD_POOL);
-  NimBLEDevice::init("Motor Nav");                                 // layanan peta ditambah sebelum Chronos memulai server
+  NimBLEDevice::init("Motor Nav");
+  artBuf = (uint16_t *)malloc(ART_BYTES);
   NimBLEServer *msrv = NimBLEDevice::createServer();
+  msrv->setCallbacks(&mapSrvCb, false);
   NimBLEService *msvc = msrv->createService(MAP_SVC_UUID);
-  NimBLECharacteristic *mch = msvc->createCharacteristic(MAP_CHR_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ);
+  NimBLECharacteristic *mch = msvc->createCharacteristic(MAP_CHR_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR | NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   mch->setCallbacks(&mapCharCb);
   mapChr = mch;
   { uint8_t z = 0; mch->setValue(&z, 1); }                         // status upload wallpaper: 0 = diam
   msvc->start();
+  {                                                                // v22.22: iklan sendiri (UUID di paket iklan, nama di scan response)
+    NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+    NimBLEAdvertisementData ad, sr;
+    ad.setFlags(0x06);
+    ad.addServiceUUID(NimBLEUUID(MAP_SVC_UUID));
+    sr.setName("Motor Nav");
+    adv->setAdvertisementData(ad);
+    adv->setScanResponseData(sr);
+    adv->enableScanResponse(true);
+    adv->start();
+  }
 #endif
-  watch.setNotificationCallback(onNotify);
-  watch.setRingerCallback(onRinger);
-  watch.begin();
-#if MAP_BLE
-  NimBLEDevice::getServer()->setCallbacks(&mapSrvCb, false);       // ganti callback agar HP-peta tidak dianggap Chronos
-#endif
-  watch.set24Hour(true);
 }
+
+
+// v22.18: halaman yang bisa dipilih lewat sentuhan hanya game; Navigasi muncul otomatis saat navigasi dimulai dari aplikasi
+static uint8_t nextGamePage() { return page >= PAGE_GAME3 ? PAGE_GAME : page + 1; }
 
 void handleTouch() {
   bool t = digitalRead(PIN_TOUCH) || bootPressed();
-  if (t && !lastTouch && callActive && millis() - lastTap > 300) {
-    lastTap = millis();       // sentuhan menutup layar panggilan
-    endCall();
+  if (callActive) {                                                // v22.19: sentuh = tutup layar, TAHAN 0,7 dtk = tolak telepon
+    static bool ch = false, cd = false;
+    static uint32_t cp = 0;
+    if (t && !lastTouch) { ch = true; cd = false; cp = millis(); }
+    if (ch && t && !cd && millis() - cp > 700) {
+      cd = true;
+      bleSendEvent(1);                                             // HP menolak panggilan
+      buzz(2, 60, 60);
+      lastTap = millis();
+      endCall();
+    }
+    if (ch && !t) {
+      ch = false;
+      if (!cd && millis() - lastTap > 300) { lastTap = millis(); endCall(); }
+    }
     lastTouch = t;
     return;
   }
@@ -3883,12 +4102,12 @@ void handleTouch() {
       lastTap = millis(); lastActivity = lastTap;
       buzz(1, 60, 0);
       if (gPressState == GS_READY) gameTapStart();
-      else { irisClose(); page = (page + 1) % PAGE_COUNT; lastSig = ""; pendingFade = true; }
+      else { irisClose(); page = nextGamePage(); lastSig = ""; pendingFade = true; }
     }
     if (gHold && !t) {
       gHold = false;
       if (gPressState == GS_PLAY) gameRelease();
-      else if (gPressState == GS_READY) { lastTap = millis(); lastActivity = lastTap; irisClose(); page = (page + 1) % PAGE_COUNT; lastSig = ""; pendingFade = true; }
+      else if (gPressState == GS_READY) { lastTap = millis(); lastActivity = lastTap; irisClose(); page = nextGamePage(); lastSig = ""; pendingFade = true; }
       else if (!gExit) gameTapStart();
     }
     lastTouch = t;
@@ -3901,12 +4120,12 @@ void handleTouch() {
     if (navHold && t && !navZeroed && millis() - navPress > 1500) { navZeroed = true; tiltZero(); buzz(2, 90, 80); }
     if (navHold && !t) {
       navHold = false;
-      if (!navZeroed) { lastTap = millis(); lastActivity = lastTap; irisClose(); page = (page + 1) % PAGE_COUNT; lastSig = ""; pendingFade = true; }
+      if (!navZeroed) { lastTap = millis(); lastActivity = lastTap; }   // v22.18: saat navigasi, sentuh singkat tidak pindah halaman
     }
     lastTouch = t;
     return;
   }
-  if (standby) {      // standby: tap = bangun | tahan 1,2 dtk lalu lepas = ganti mode | tahan 4 dtk lalu lepas = mode upload foto
+  if (standby) {      // standby: tap = bangun | tahan 1,2 dtk lalu lepas = ganti mode | tahan 4 dtk lalu lepas = menu pengaturan
     static bool sbHold = false;
     static uint8_t sbStage = 0;
     static uint32_t sbPress = 0;
@@ -3914,7 +4133,7 @@ void handleTouch() {
     if (sbHold && t) {
       uint32_t d = millis() - sbPress;
       if (sbStage == 0 && d > 1200) { sbStage = 1; buzz(1, 60, 0); }       // bunyi 1x: lepas sekarang = ganti mode
-      if (sbStage == 1 && d > 4000) { sbStage = 2; buzz(3, 60, 60); }      // bunyi 3x: lepas sekarang = mode upload foto
+      if (sbStage == 1 && d > 4000) { sbStage = 2; buzz(3, 60, 60); }      // bunyi 3x: lepas sekarang = menu pengaturan
     }
     if (sbHold && !t) {
       sbHold = false;
@@ -3930,7 +4149,7 @@ void handleTouch() {
       } else {
         irisClose();
         standby = false;
-        page = isLinked() ? PAGE_NAV : PAGE_GAME;
+        page = PAGE_GAME;   // v22.18: dari standby sentuhan hanya membuka mode game
         lastSig = "";
         pendingFade = true;
       }
@@ -3944,10 +4163,10 @@ void handleTouch() {
     if (standby) {
       irisClose();
       standby = false;      // sentuhan pertama hanya membangunkan
-      page = isLinked() ? PAGE_NAV : PAGE_GAME;   // v20: tanpa Chronos, sentuhan langsung membuka game
+      page = PAGE_GAME;   // v22.18: dari standby sentuhan hanya membuka mode game
     } else {
       irisClose();
-      page = (page + 1) % PAGE_COUNT;
+      page = nextGamePage();
     }
     lastSig = "";
     pendingFade = true;
@@ -3979,14 +4198,8 @@ void updateClock(bool connected) {
     clockSet = true;
     return;
   }
-  if (!connected) return;
+  (void)connected;                    // v22.22: jam hanya dari aplikasi MotorNav
   lastClockPoll = millis();
-  int h = watch.getHourC();          // jam 24 jam (set24Hour(true))
-  int m = watch.getMinute();
-  if (h < 0 || h > 23 || m < 0 || m > 59) return;
-  clockBaseMin = h * 60 + m;
-  clockBaseMs = millis();
-  clockSet = true;
 }
 
 // menit dalam sehari, atau -1 jika jam belum pernah tersinkron
@@ -3997,19 +4210,19 @@ int clockMinutes(bool connected) {
 }
 
 void loop() {
-  watch.loop();
   updateBuzzer();
   handleTouch();
   tiltTick();                                                      // sudut miring dibaca terus di semua mode
+  if (cfgDirtyAt && millis() - cfgDirtyAt > 1500) { cfgDirtyAt = 0; saveCfg(); }   // v22.23: simpan pengaturan setelah berhenti diubah
 
 #if MAP_BLE
   bleWpTick();
   {
-    static uint32_t advT = 0;                                      // iklan tetap menyala selama koneksi < 2 (HP Chronos + HP-peta)
+    static uint32_t advT = 0;                                      // iklan tetap menyala selama belum ada HP tersambung
     if (millis() - advT > 2000) {
       advT = millis();
       NimBLEServer *sv = NimBLEDevice::getServer();
-      if (sv && sv->getConnectedCount() < 2 && !NimBLEDevice::getAdvertising()->isAdvertising()) NimBLEDevice::startAdvertising();
+      if (sv && sv->getConnectedCount() < 1 && !NimBLEDevice::getAdvertising()->isAdvertising()) NimBLEDevice::startAdvertising();
     }
   }
 #endif
@@ -4018,10 +4231,10 @@ void loop() {
   pollMusic(connected);                                            // detik lagu terus dihitung di semua halaman
   static Navigation nav;                                           // disalin tiap 40 ms saja (hemat heap, FPS naik)
   static uint32_t lastNavPoll = 0;
-  if (millis() - lastNavPoll >= 40) { lastNavPoll = millis(); nav = watch.getNavigation(); if (appNavOn()) nav.active = true; }
+  if (millis() - lastNavPoll >= 40) { lastNavPoll = millis(); if (appNavOn()) nav.active = true; else nav.active = false; }
 
   if (callEndPending) { callEndPending = false; if (callActive) endCall(); }
-  if (callStartPending) { callStartPending = false; startCall(); }
+  if (callStartPending) { callStartPending = false; if (!callActive) startCall(); }   // jika sudah berdering: hanya nama diperbarui
   if (callActive) {
     notifPending = false;                 // panggilan lebih penting dari notifikasi
     updateCall();
@@ -4048,6 +4261,12 @@ void loop() {
     lastSig = "";
     pendingFade = true;
   }
+  if (!nav.active && lastActive && !standby && !settingsActive) {   // v22.18: navigasi selesai -> langsung ke wajah/wallpaper
+    lastActive = false;
+    enterStandby(connected);
+    return;
+  }
+  if (nav.active && page != PAGE_NAV && !settingsActive) { page = PAGE_NAV; lastSig = ""; pendingFade = true; }   // saat navigasi tidak ada game
   lastActive = nav.active;
 
   if (settingsActive) {                                            // menu pengaturan menggantikan semua halaman
@@ -4059,7 +4278,7 @@ void loop() {
   }
 
   // v20: Bluetooth putus di halaman Navigasi langsung masuk standby (game tetap bisa dimainkan lewat sentuhan)
-  if (!standby && !nav.active && (millis() - lastActivity > STANDBY_MS || (!connected && page == PAGE_NAV))) {
+  if (!standby && !nav.active && (millis() - lastActivity > (uint32_t)cfg[8] * 1000UL || (!connected && page == PAGE_NAV))) {
     enterStandby(connected);
   }
   if (standby) {
