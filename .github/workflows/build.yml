@@ -8,8 +8,8 @@ on:
         description: "Versi ESP32 core (Arduino)"
         default: "2.0.17"
       gfx_version:
-        description: "Versi library GFX Library for Arduino (kosong = terbaru)"
-        default: ""
+        description: "Versi library GFX Library for Arduino"
+        default: "1.4.9"
 
 jobs:
   build:
@@ -32,11 +32,8 @@ jobs:
       - name: Pasang library
         run: |
           GFX="${{ github.event.inputs.gfx_version }}"
-          if [ -n "$GFX" ]; then
-            arduino-cli lib install "GFX Library for Arduino@${GFX}"
-          else
-            arduino-cli lib install "GFX Library for Arduino"
-          fi
+          GFX="${GFX:-1.4.9}"
+          arduino-cli lib install "GFX Library for Arduino@${GFX}"
           arduino-cli lib install "ChronosESP32"
 
       - name: Siapkan folder sketch
