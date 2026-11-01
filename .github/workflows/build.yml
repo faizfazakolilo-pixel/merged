@@ -34,7 +34,7 @@ jobs:
           GFX="${{ github.event.inputs.gfx_version }}"
           GFX="${GFX:-1.4.9}"
           arduino-cli lib install "GFX Library for Arduino@${GFX}"
-          arduino-cli lib install "ChronosESP32"
+          arduino-cli lib install "NimBLE-Arduino"
 
       - name: Siapkan folder sketch
         run: |
@@ -42,20 +42,36 @@ jobs:
           cp motor_nav_esp32_v22.ino partitions.csv standby_photo.h motor_nav_esp32_v22/
           ls -la motor_nav_esp32_v22
 
-      - name: Tambal kompatibilitas core 2.x (ESP-IDF 4)
+      - name: Tambal kompatibilitas (core 2.x dan urutan tipe Navigation)
         run: |
+          SK=motor_nav_esp32_v22/motor_nav_esp32_v22.ino
           CORE="${{ github.event.inputs.esp32_core }}"
           CORE="${CORE:-2.0.17}"
           case "$CORE" in
-            2.*) sed -i 's/ESP_PARTITION_MMAP_DATA/SPI_FLASH_MMAP_DATA/g' motor_nav_esp32_v22/motor_nav_esp32_v22.ino ;;
+            2.*) sed -i 's/ESP_PARTITION_MMAP_DATA/SPI_FLASH_MMAP_DATA/g' "$SK" ;;
           esac
-          grep -n "MMAP_DATA" motor_nav_esp32_v22/motor_nav_esp32_v22.ino
+          python3 - "$SK" << 'PY'
+          import re, sys
+          p = sys.argv[1]
+          s = open(p, encoding="utf-8").read()
+          m = re.search(r"// v22\.22: pengganti tipe Navigation.*?\n};\n", s, re.S)
+          if not m:
+              print("struct Navigation tidak ditemukan, dilewati")
+              sys.exit(0)
+          block = m.group(0)
+          s = s.replace(block, "", 1)
+          anchor = "#if CONFIG_IDF_TARGET_ESP32C3"
+          i = s.index(anchor)
+          s = s[:i] + block + "\n" + s[i:]
+          open(p, "w", encoding="utf-8").write(s)
+          print("struct Navigation dipindah ke atas")
+          PY
 
       - name: Compile (ESP32 Dev Module, flash 4MB, partisi custom)
         run: |
           arduino-cli compile \
             --fqbn esp32:esp32:esp32:FlashSize=4M \
-            --build-property upload.maximum_size=1703936 \
+            --build-property upload.maximum_size=1310720 \
             --export-binaries \
             --output-dir out \
             motor_nav_esp32_v22
@@ -74,11 +90,11 @@ jobs:
                   continue
               typ, sub, off, size = struct.unpack("<BBII", e[2:12])
               name = e[12:28].split(b"\0")[0].decode()
-              print(f"{name:8s} type={typ} sub={sub} offset=0x{off:X} size=0x{size:X}")
-              if name == "app0" and size == 0x1A0000:
+              print(f"{name:9s} type={typ} sub={sub} offset=0x{off:X} size=0x{size:X}")
+              if name == "app0" and size == 0x140000:
                   ok = True
           if not ok:
-              print("PERINGATAN: partisi app0 bukan 0x1A0000, partitions.csv tidak terpakai!")
+              print("PERINGATAN: partisi app0 bukan 0x140000, partitions.csv tidak terpakai!")
               sys.exit(1)
           PY
 
